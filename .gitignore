@@ -1,3 +1,5 @@
+/.metadata/
+target/
 # Java build
 target/
 *.class
@@ -35,3 +37,11 @@ logs/
 .settings/
 .classpath
 .project
+# Ignore build outputs
+*.o
+*.obj
+*.class
+*.exe
+*.dll
+/mobile-app/android-stale-cleartext/app/.cxx/
+

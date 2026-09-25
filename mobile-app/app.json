@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "tBits-plug",
+    "slug": "building-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "buildingapp",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/expo.icon"
+    },
+    "android": {
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.buildingapp",
+      "ndkVersion": "26.1.10909125"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow tBits Plug to scan your apartment charger QR code.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#2563EB",
+          "defaultChannel": "charging-updates"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#208AEF",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "29456b9a-aba9-4444-81df-a1dfd21da18a"
+      }
+    }
+  }
+}
