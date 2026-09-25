@@ -1,0 +1,37 @@
+# Java build
+target/
+*.class
+*.jar
+
+# Environment / secrets
+.env
+.env.*
+secrets/
+secret/
+credentials/
+config/secrets/
+
+# Service account / credentials
+*service-account*.json
+*serviceaccount*.json
+*firebase-adminsdk*.json
+*credentials*.json
+google-services.json
+
+# Private keys / certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+.settings/
+.classpath
+.project

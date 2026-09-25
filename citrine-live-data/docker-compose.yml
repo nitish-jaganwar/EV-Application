@@ -1,0 +1,23 @@
+services:
+  citrine-live-data:
+    build: .
+    container_name: citrine-live-data
+    restart: unless-stopped
+    ports:
+      # - "9100:9100"
+      - 127.0.0.1:9100:9100
+    environment:
+      PORT: "9100"
+      FIREBASE_ENABLED: "true"
+      FIREBASE_PROJECT_ID: "ev-test-001"
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
+      POC_CHARGER_OWNERSHIP: "cp001:8305763637"
+      CORS_ALLOWED_ORIGINS: "http://localhost:8081,http://127.0.0.1:8081"
+    volumes:
+      - ./secrets/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro
+    networks:
+      - citrineos
+
+networks:
+  citrineos:
+    external: true
