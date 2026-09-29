@@ -1,6 +1,6 @@
 import type { ChargerStatus, ChargerTelemetry, PhaseTelemetry } from '@/services/citrineOsService';
 
-const DEFAULT_API_BASE_URL = 'http://65.21.108.234:9100';
+const DEFAULT_API_BASE_URL = 'https://csms.mytbits.com/java-api';
 const REQUEST_TIMEOUT_MS = 8_000;
 
 export const CHARGER_API_BASE_URL = (
@@ -153,7 +153,7 @@ export async function stopChargingTransaction(
 
   try {
     response = await fetch(
-      `${CHARGER_API_BASE_URL}/api/chargers/${encodeURIComponent(chargerId)}/commands/stop`,
+      `${CHARGER_API_BASE_URL}/chargers/${encodeURIComponent(chargerId)}/commands/stop`,
       {
         method: 'POST',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -199,7 +199,7 @@ export async function fetchChargerTelemetry(
 
   try {
     const response = await fetch(
-      `${CHARGER_API_BASE_URL}/api/chargers/${encodeURIComponent(chargerId)}`,
+      `${CHARGER_API_BASE_URL}/chargers/${encodeURIComponent(chargerId)}`,
       { headers: { Accept: 'application/json' }, signal: timeoutController.signal },
     );
     if (!response.ok) {

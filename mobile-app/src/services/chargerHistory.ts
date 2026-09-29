@@ -138,7 +138,7 @@ export function parseMeterEvents(events: unknown): MeterPoint[] {
 
 export async function fetchChargerHistory(chargerId: string, signal?: AbortSignal): Promise<MeterPoint[]> {
   const response = await fetch(
-    `${CHARGER_API_BASE_URL}/api/chargers/${encodeURIComponent(chargerId)}/events`,
+    `${CHARGER_API_BASE_URL}/chargers/${encodeURIComponent(chargerId)}/events`,
     { headers: { Accept: 'application/json' }, signal },
   );
   if (!response.ok) throw new Error(`Meter history returned HTTP ${response.status}`);
