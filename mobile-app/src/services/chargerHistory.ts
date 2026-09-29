@@ -110,7 +110,7 @@ export function mergeMeterPoints(points: MeterPoint[]): MeterPoint[] {
       ...Object.fromEntries(Object.entries(point).filter(([, value]) => value !== undefined)),
     } as MeterPoint);
   }
-  return [...byTime.values()].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)).slice(-200);
+  return [...byTime.values()].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
 }
 
 export function parseMeterEvents(events: unknown): MeterPoint[] {

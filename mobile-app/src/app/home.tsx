@@ -397,6 +397,8 @@ export default function HomeScreen() {
           {/* Temporarily replace the Grid → charger → vehicle flow with meter history. */}
           <LiveTelemetryChart
             points={meterHistory}
+            sessionStartedAt={liveTelemetry?.transactionStartedAt}
+            sessionEndedAt={liveTelemetry?.transactionEventType === 'Ended' ? liveTelemetry.meterTimestamp : undefined}
             isLoading={isHistoryLoading}
             error={historyError}
             isStale={isTelemetryStale || isChargerOffline}
