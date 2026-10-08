@@ -1,6 +1,6 @@
 import type { ChargerStatus, ChargerTelemetry, PhaseTelemetry } from '@/services/citrineOsService';
 
-const DEFAULT_API_BASE_URL = 'https://csms.mytbits.com/java-api';
+const DEFAULT_API_BASE_URL = 'http://localhost:9100/api';
 const REQUEST_TIMEOUT_MS = 8_000;
 
 export const CHARGER_API_BASE_URL = (
