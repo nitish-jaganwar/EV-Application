@@ -1,3 +1,4 @@
+import ParkingHistory from '@/features/parking/ParkingHistory';
 import type { MeterPoint } from '@/services/chargerHistory';
 import { bookingRepository } from '@/features/booking/bookingRepository';
 import { formatDuration } from '@/features/booking/bookingRules';
@@ -33,7 +34,7 @@ export default function ChargingRecords({ points, loading, error, ownerId }: Pro
   const upcoming = confirmed.filter((booking) => Date.parse(booking.endsAt) > Date.now());
   return <View style={styles.root}>
     <Text style={styles.title}>Records</Text>
-    <Text style={styles.subtitle}>Your demo bookings and available charger meter reports</Text>
+    <Text style={styles.subtitle}>Your parking allocations and available charger meter reports</Text>
 
     <View style={styles.stats}>
       <View style={styles.stat}><Text style={styles.statValue}>{confirmed.length}</Text><Text style={styles.statLabel}>Booked slots</Text></View>
@@ -41,7 +42,8 @@ export default function ChargingRecords({ points, loading, error, ownerId }: Pro
       <View style={styles.stat}><Text style={styles.statValue}>{points.length}</Text><Text style={styles.statLabel}>Meter readings</Text></View>
     </View>
 
-    <Text style={styles.section}>Booking history</Text>
+    <ParkingHistory ownerId={ownerId} />
+    <Text style={styles.section}>Previous booking history</Text>
     {!ownerId ? <Text style={styles.empty}>Sign in to see your bookings.</Text> : null}
     {bookingError ? <Text style={styles.empty}>Booking history is unavailable.</Text> : null}
     {ownerId && !bookingError && !bookings.length ? <Text style={styles.empty}>No bookings yet.</Text> : null}

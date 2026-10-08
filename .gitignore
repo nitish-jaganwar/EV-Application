@@ -44,4 +44,4 @@ logs/
 *.exe
 *.dll
 /mobile-app/android-stale-cleartext/app/.cxx/
-
+citrineos-core/

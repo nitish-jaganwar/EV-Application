@@ -3,7 +3,8 @@ import NotificationCenter from '@/components/notifications/NotificationCenter';
 import LivePowerGauge from '@/components/LivePowerGauge';
 import ChargingRecords from '@/components/ChargingRecords';
 import LiveTelemetryChart from '@/components/LiveTelemetryChart';
-import BookingSchedule from '@/features/booking/BookingSchedule';
+import ParkingScreen from '@/features/parking/ParkingScreen';
+import { useParkingNotifications } from '@/features/parking/parkingNotifications';
 import ScanToChargeSheet from '@/features/booking/ScanToChargeSheet';
 import { useNotifications } from '@/context/NotificationContext';
 import { POPULAR_EVS, useVehicle } from '@/context/VehicleContext';
@@ -28,6 +29,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path, Rect } from 'react-native-svg';
 
 // -------------------------------------------------------------
 // TYPES & MOCK DATA
@@ -74,6 +76,7 @@ const PHASE_READING_ROWS: {
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
+  useParkingNotifications(user?.mobile ?? null);
   const { vehicles, selectedVehicle, selectVehicle, addVehicle } = useVehicle();
   const { unreadCount } = useNotifications();
   const { notificationTab, notificationId } = useLocalSearchParams<{ notificationTab?: string; notificationId?: string }>();
@@ -268,16 +271,8 @@ export default function HomeScreen() {
           TAB 1: LIVE CHARGE (DEFAULT MAIN HOME SCREEN)
       -------------------------------------------------------------- */}
       {activeTab === 'LIVE' && (
-        <ScrollView contentContainerStyle={[styles.scrollContent, hasActiveTransaction && styles.scrollWithStop]} showsVerticalScrollIndicator={false}>
-          <Pressable style={styles.scanEntry} onPress={() => setScanVisible(true)} accessibilityRole="button">
-            <Text style={styles.scanEntryIcon}>▣</Text>
-            <View style={styles.scanEntryCopy}>
-              <Text style={styles.scanEntryTitle}>Scan to Charge</Text>
-              <Text style={styles.scanEntrySub}>See chargers and the next available slot</Text>
-            </View>
-            <Text style={styles.scanEntryArrow}>›</Text>
-          </Pressable>
-          {/* Active Status Header Pill */}
+        <ScrollView contentContainerStyle={[styles.scrollContent, styles.scrollWithScan, hasActiveTransaction && styles.scrollWithStop]} showsVerticalScrollIndicator={false}>
+{/* Active Status Header Pill */}
           <View style={[
             styles.liveSessionBadge,
             !isCharging && styles.sessionBadgeIdle,
@@ -499,7 +494,7 @@ export default function HomeScreen() {
         </ScrollView>
       )}
 
-      {activeTab === 'SCHEDULE' && <BookingSchedule vehicle={selectedVehicle} ownerId={user?.mobile ?? null}
+      {activeTab === 'SCHEDULE' && <ParkingScreen vehicle={selectedVehicle} ownerId={user?.mobile ?? null}
         onSelectVehicle={() => setVehiclePickerVisible(true)} />}
 
       {/* -------------------------------------------------------------
@@ -572,6 +567,27 @@ export default function HomeScreen() {
       {/* -------------------------------------------------------------
           BOTTOM 4-TAB BAR (CLEAN & SPACIOUS)
       -------------------------------------------------------------- */}
+      {activeTab === 'LIVE' && (
+        <Pressable
+          style={({ pressed }) => [
+            styles.floatingScanButton,
+            { bottom: Math.max(insets.bottom, 10) + 58 },
+            pressed && styles.floatingScanPressed,
+          ]}
+          onPress={() => setScanVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Scan to Charge"
+          accessibilityHint="View compatible chargers, available slots, or scan a charger QR code"
+        >
+          <Svg width={26} height={26} viewBox="0 0 24 24">
+            <Rect x={2} y={2} width={7} height={7} rx={1} fill="none" stroke="#2563EB" strokeWidth={1.7} />
+            <Rect x={15} y={2} width={7} height={7} rx={1} fill="none" stroke="#2563EB" strokeWidth={1.7} />
+            <Rect x={2} y={15} width={7} height={7} rx={1} fill="none" stroke="#2563EB" strokeWidth={1.7} />
+            <Path d="M5 5h1v1H5z M18 5h1v1h-1z M5 18h1v1H5z M12 2v3m0 5v4h4m-4 3v5m3-10h3v3h4m-7 3h3v4m3-4v4M2 12h5m14 0h1" fill="none" stroke="#2563EB" strokeWidth={1.7} />
+          </Svg>
+          <Text style={styles.floatingScanLabel}>Scan</Text>
+        </Pressable>
+      )}
       {activeTab === 'LIVE' && hasActiveTransaction && <Pressable
         style={[styles.fixedStopButton, { bottom: Math.max(insets.bottom, 10) + 58 }]}
         onPress={() => setStopChargingModalVisible(true)} accessibilityRole="button"
@@ -586,8 +602,8 @@ export default function HomeScreen() {
         </Pressable>
 
         <Pressable style={[styles.tabButton, activeTab === 'SCHEDULE' && styles.tabButtonActive]} onPress={() => setActiveTab('SCHEDULE')}>
-          <Text style={[styles.tabIcon, activeTab === 'SCHEDULE' && styles.tabIconActive]}>📅</Text>
-          <Text style={[styles.tabLabel, activeTab === 'SCHEDULE' && styles.tabLabelActive]}>Schedule</Text>
+          <Text style={[styles.tabIcon, activeTab === 'SCHEDULE' && styles.tabIconActive]}>🅿️</Text>
+          <Text style={[styles.tabLabel, activeTab === 'SCHEDULE' && styles.tabLabelActive]}>Parking</Text>
         </Pressable>
 
         <Pressable style={[styles.tabButton, activeTab === 'RECORDS' && styles.tabButtonActive]} onPress={() => setActiveTab('RECORDS')}>
@@ -804,12 +820,7 @@ const styles = StyleSheet.create({
   vehBadgeArrow: { fontSize: 10, color: '#64748B' },
 
   scrollContent: { padding: 14, paddingBottom: 90 },
-  scanEntry: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4EAF4', borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  scanEntryIcon: { color: '#2563EB', fontSize: 25, marginRight: 12 },
-  scanEntryCopy: { flex: 1 },
-  scanEntryTitle: { color: '#25344B', fontSize: 13, fontWeight: '600' },
-  scanEntrySub: { color: '#8592A5', fontSize: 10, marginTop: 2 },
-  scanEntryArrow: { color: '#7D90AD', fontSize: 22 },
+  scrollWithScan: { paddingBottom: 150 },
   scrollWithStop: { paddingBottom: 160 },
   recordsScrollContent: { paddingBottom: 80 },
 
@@ -1060,7 +1071,15 @@ const styles = StyleSheet.create({
   tabIconActive: { color: '#2563EB' },
   tabLabel: { fontSize: 10, color: '#64748B', fontWeight: '600', marginTop: 2 },
   tabLabelActive: { color: '#2563EB', fontWeight: '600' },
-  fixedStopButton: { position: 'absolute', left: 16, right: 16, zIndex: 5, backgroundColor: '#E7EDF8', borderWidth: 1, borderColor: '#CFD9EA', borderRadius: 11, alignItems: 'center', paddingVertical: 12 },
+  fixedStopButton: { position: 'absolute', left: 16, right: 94, zIndex: 5, backgroundColor: '#E7EDF8', borderWidth: 1, borderColor: '#CFD9EA', borderRadius: 11, alignItems: 'center', paddingVertical: 12 },
+  floatingScanButton: {
+    position: 'absolute', right: 16, width: 64, height: 64, zIndex: 6,
+    borderRadius: 20, borderWidth: 1, borderColor: '#D7E5FA',
+    backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 3,
+    boxShadow: '0px 3px 10px rgba(37, 99, 235, 0.12)', elevation: 4,
+  },
+  floatingScanPressed: { backgroundColor: '#EFF6FF' },
+  floatingScanLabel: { fontSize: 10, fontWeight: '500', color: '#2563EB' },
   fixedStopText: { color: '#23406E', fontSize: 13, fontWeight: '600' },
 
   // Vehicle selector
