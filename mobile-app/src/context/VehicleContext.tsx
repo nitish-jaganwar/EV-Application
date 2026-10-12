@@ -60,7 +60,12 @@ export const VehicleProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...newVeh,
       id: `veh-${Date.now()}`,
     };
-    setVehicles((prev) => [...prev, item]);
+    setVehicles((prev) => {
+      if (prev.length === 1 && prev[0].id === 'veh-1') {
+        return [item];
+      }
+      return [...prev, item];
+    });
     setSelectedVehicle(item);
   };
 

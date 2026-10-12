@@ -29,7 +29,11 @@ export interface UserProfile {
   email: string;
   mobile: string;
   residentType: 'OWNER' | 'TENANT';
+  block?: string;
+  apartmentNumber?: string;
   flatNumber?: string;
+  vehicleModel?: string;
+  vehiclePlateNumber?: string;
 }
 
 interface AuthContextType {
@@ -51,7 +55,11 @@ const DEFAULT_USERS: Record<string, UserProfile> = {
     email: 'resident@apartment.com',
     mobile: '8305763637',
     residentType: 'OWNER',
+    block: 'Tower A',
+    apartmentNumber: '402',
     flatNumber: 'Tower A - 402',
+    vehicleModel: 'Hero Vida V1 Pro',
+    vehiclePlateNumber: 'MP 04 74207',
   },
 };
 
