@@ -8,7 +8,11 @@
     "scheme": "buildingapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.anonymous.buildingapp",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "googleServicesFile": "./google-services.json",
@@ -20,7 +24,10 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.buildingapp",
-      "ndkVersion": "26.1.10909125"
+      "ndkVersion": "26.1.10909125",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "output": "static",

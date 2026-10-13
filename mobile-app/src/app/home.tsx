@@ -33,8 +33,8 @@ export default function HomeScreen() {
   const { vehicles, selectedVehicle, selectVehicle } = useVehicle();
   const { unreadCount } = useNotifications();
 
-  // Navigation tab: 'HOME' | 'RECORDS' | 'SETTINGS'
-  const [activeTab, setActiveTab] = useState<'HOME' | 'RECORDS' | 'SETTINGS'>('HOME');
+  // Navigation tab: 'HOME' | 'RECORDS' | 'PROFILE'
+  const [activeTab, setActiveTab] = useState<'HOME' | 'RECORDS' | 'PROFILE'>('HOME');
 
   // Filter for chargers
   const [filterType, setFilterType] = useState<'ALL' | 'AVAILABLE' | 'COMPATIBLE'>('ALL');
@@ -45,6 +45,25 @@ export default function HomeScreen() {
   const [startChargeModalVisible, setStartChargeModalVisible] = useState(false);
   const [selectedChargerForBooking, setSelectedChargerForBooking] = useState<ChargerItem | null>(null);
   const [qrScannerVisible, setQrScannerVisible] = useState(false);
+
+  // Custom Branded Dialog Modals State (replacing raw OS alerts)
+  const [sessionStartedModalVisible, setSessionStartedModalVisible] = useState(false);
+  const [stopConfirmModalVisible, setStopConfirmModalVisible] = useState(false);
+  const [sessionSummaryModalVisible, setSessionSummaryModalVisible] = useState(false);
+  const [completedSessionData, setCompletedSessionData] = useState<{
+    deliveredKwh: number;
+    totalBill: string;
+    chargerName: string;
+    bayNumber: string;
+    durationMins: number;
+  } | null>(null);
+  const [reservationConfirmedModalVisible, setReservationConfirmedModalVisible] = useState(false);
+  const [confirmedReservationData, setConfirmedReservationData] = useState<{
+    chargerName: string;
+    slotTime: string;
+    rate: number;
+    savings: number;
+  } | null>(null);
 
   // Start Charging Sheet State
   const [chargingMode, setChargingMode] = useState<'WALK_IN' | 'RESERVE'>('WALK_IN');
@@ -149,45 +168,44 @@ export default function HomeScreen() {
     setDeliveredKwh(0.1);
     setElapsedSeconds(10);
     setIsChargingActive(true);
-    Alert.alert(
-      '⚡ Walk-in Charging Started!',
-      `Connected to ${charger.name} at ${charger.bayNumber}.\nRate: ₹${charger.walkInRatePerKwh}/kWh.\nElectricity is flowing to your ${selectedVehicle?.name || 'EV'}.`
-    );
+    setSessionStartedModalVisible(true);
   };
 
   // Confirm Reservation Booking
   const handleConfirmReservation = () => {
     if (!selectedChargerForBooking) return;
     setStartChargeModalVisible(false);
-    Alert.alert(
-      'Slot Reserved Successfully! 📅',
-      `Your booking for ${selectedChargerForBooking.name} (${selectedSlotTime}) has been confirmed at the discounted rate of ₹${selectedChargerForBooking.reservationRatePerKwh}/kWh.`
-    );
+    setConfirmedReservationData({
+      chargerName: selectedChargerForBooking.name,
+      slotTime: selectedSlotTime,
+      rate: selectedChargerForBooking.reservationRatePerKwh,
+      savings:
+        selectedChargerForBooking.walkInRatePerKwh -
+        selectedChargerForBooking.reservationRatePerKwh,
+    });
+    setReservationConfirmedModalVisible(true);
   };
 
-  // Stop Charging Action
+  // Stop Charging Action (opens custom modal)
   const handleStopCharging = () => {
-    Alert.alert(
-      'Stop Charging?',
-      'Are you sure you want to stop power delivery and end this session?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Stop & Pay',
-          style: 'destructive',
-          onPress: () => {
-            setIsChargingActive(false);
-            const totalBill = (
-              deliveredKwh * (activeSessionCharger?.walkInRatePerKwh || 15)
-            ).toFixed(2);
-            Alert.alert(
-              'Session Completed 🏁',
-              `Delivered: ${deliveredKwh.toFixed(2)} kWh\nTotal Bill: ₹${totalBill}\n\nPlease unplug and free the bay for fellow residents.`
-            );
-          },
-        },
-      ]
-    );
+    setStopConfirmModalVisible(true);
+  };
+
+  // Execute Stop Charging from custom modal
+  const handleExecuteStopSession = () => {
+    setStopConfirmModalVisible(false);
+    const totalBill = (
+      deliveredKwh * (activeSessionCharger?.walkInRatePerKwh || 15)
+    ).toFixed(2);
+    setCompletedSessionData({
+      deliveredKwh: Number(deliveredKwh.toFixed(2)),
+      totalBill,
+      chargerName: activeSessionCharger?.name || 'Charger C1',
+      bayNumber: activeSessionCharger?.bayNumber || 'Bay 01',
+      durationMins: Math.max(1, Math.round(elapsedSeconds / 60)),
+    });
+    setIsChargingActive(false);
+    setSessionSummaryModalVisible(true);
   };
 
   // Calculate costs in sheet
@@ -229,7 +247,7 @@ export default function HomeScreen() {
 
             <Pressable
               style={styles.profileAvatar}
-              onPress={() => setActiveTab('SETTINGS')}
+              onPress={() => setActiveTab('PROFILE')}
             >
               <Text style={styles.profileAvatarText}>
                 {user?.fullName?.slice(0, 1).toUpperCase() || 'N'}
@@ -422,7 +440,11 @@ export default function HomeScreen() {
                 style={styles.simulatePill}
                 onPress={() => {
                   setActiveSessionCharger(APARTMENT_CHARGERS[0]);
+                  setTargetKwh(15);
+                  setDeliveredKwh(0.1);
+                  setElapsedSeconds(10);
                   setIsChargingActive(true);
+                  setSessionStartedModalVisible(true);
                 }}
               >
                 <Text style={styles.simulatePillText}>⚡ Demo Session</Text>
@@ -548,33 +570,31 @@ export default function HomeScreen() {
                     </View>
                   )}
 
-                  {/* Dual Pricing Comparison Box */}
-                  <View style={styles.pricingComparisonBox}>
-                    <View style={styles.pricingCol}>
-                      <Text style={styles.pricingHeader}>⚡ Immediate Walk-in</Text>
-                      <Text style={styles.walkInPriceText}>
+                  {/* Minimal Dual-Pricing Row */}
+                  <View style={styles.minimalPricingBox}>
+                    <View style={styles.minimalPriceCol}>
+                      <Text style={styles.minimalPriceLabel}>⚡ Walk-in</Text>
+                      <Text style={styles.minimalPriceVal}>
                         ₹{charger.walkInRatePerKwh}
-                        <Text style={styles.perKwh}> / kWh</Text>
+                        <Text style={styles.minimalPriceUnit}> / kWh</Text>
                       </Text>
-                      <Text style={styles.pricingNote}>Instant start</Text>
                     </View>
 
-                    <View style={styles.pricingDivider} />
+                    <View style={styles.minimalPriceDivider} />
 
-                    <View style={styles.pricingCol}>
-                      <View style={styles.discountRow}>
-                        <Text style={styles.pricingHeader}>📅 Reserve Slot</Text>
-                        <View style={styles.saveBadge}>
-                          <Text style={styles.saveBadgeText}>
+                    <View style={styles.minimalPriceCol}>
+                      <View style={styles.minimalSaveRow}>
+                        <Text style={styles.minimalPriceLabel}>📅 Reserved</Text>
+                        <View style={styles.minimalSaveBadge}>
+                          <Text style={styles.minimalSaveBadgeText}>
                             Save ₹{charger.walkInRatePerKwh - charger.reservationRatePerKwh}
                           </Text>
                         </View>
                       </View>
-                      <Text style={styles.reservationPriceText}>
+                      <Text style={styles.minimalPriceValGreen}>
                         ₹{charger.reservationRatePerKwh}
-                        <Text style={styles.perKwh}> / kWh</Text>
+                        <Text style={styles.minimalPriceUnit}> / kWh</Text>
                       </Text>
-                      <Text style={styles.pricingNoteDiscount}>Pre-booked slot</Text>
                     </View>
                   </View>
 
@@ -625,41 +645,134 @@ export default function HomeScreen() {
       )}
 
       {/* -------------------------------------------------------------
-          TAB 3: SETTINGS & PROFILE
+          TAB 3: PROFILE HUB
       -------------------------------------------------------------- */}
-      {activeTab === 'SETTINGS' && (
-        <ScrollView contentContainerStyle={styles.mainScroll} showsVerticalScrollIndicator={false}>
-          <View style={styles.settingsCard}>
-            <Text style={styles.settingsTitle}>Resident Profile</Text>
-            <Text style={styles.profileRow}>Name: <Text style={styles.bold}>{user?.fullName || 'Resident'}</Text></Text>
-            <Text style={styles.profileRow}>Mobile: <Text style={styles.bold}>{user?.mobile || '8305763637'}</Text></Text>
-            <Text style={styles.profileRow}>Apartment: <Text style={styles.bold}>{user?.flatNumber || 'Tower A - 402'}</Text></Text>
-            <Text style={styles.profileRow}>Resident Type: <Text style={styles.bold}>{user?.residentType || 'OWNER'}</Text></Text>
+      {activeTab === 'PROFILE' && (
+        <ScrollView
+          contentContainerStyle={[styles.mainScroll, { paddingBottom: 110 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Resident Identity Card */}
+          <View style={styles.profileHeroCard}>
+            <View style={styles.profileHeroHeader}>
+              <View style={styles.profileAvatarLarge}>
+                <Text style={styles.profileAvatarLargeText}>
+                  {user?.fullName?.slice(0, 1).toUpperCase() || 'N'}
+                </Text>
+              </View>
+              <View style={styles.profileNameCol}>
+                <Text style={styles.profileFullName}>
+                  {user?.fullName || 'Nitish Jaganwar'}
+                </Text>
+                <Text style={styles.profileSubInfo}>
+                  {user?.flatNumber || (user?.block ? `${user.block} - ${user.apartmentNumber}` : 'Tower A - 402')}
+                </Text>
+                <View style={styles.residentBadge}>
+                  <Text style={styles.residentBadgeText}>
+                    {user?.residentType === 'TENANT' ? 'Apartment Tenant' : 'Apartment Owner'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.profileContactDivider} />
+            <View style={styles.profileContactRow}>
+              <Text style={styles.profileContactLabel}>Registered Mobile</Text>
+              <Text style={styles.profileContactValue}>{user?.mobile || '+91 83057 63637'}</Text>
+            </View>
           </View>
 
-          <View style={styles.settingsCard}>
-            <Text style={styles.settingsTitle}>Active Vehicle</Text>
-            <Text style={styles.profileRow}>Vehicle: <Text style={styles.bold}>{selectedVehicle?.name}</Text></Text>
-            <Text style={styles.profileRow}>Plate: <Text style={styles.bold}>{selectedVehicle?.plateNumber}</Text></Text>
-            <Text style={styles.profileRow}>Connector: <Text style={styles.bold}>{selectedVehicle?.connectorType}</Text></Text>
-            <Text style={styles.profileRow}>Battery: <Text style={styles.bold}>{selectedVehicle?.batteryCapacityKwh} kWh</Text></Text>
+          {/* My EV Garage Card */}
+          <View style={styles.profileSectionCard}>
+            <View style={styles.profileSectionHeader}>
+              <Text style={styles.profileSectionTitle}>My EV Garage</Text>
+              <Pressable
+                style={styles.switchVehInlineBtn}
+                onPress={() => setVehiclePickerVisible(true)}
+              >
+                <Text style={styles.switchVehInlineText}>Switch / Add</Text>
+              </Pressable>
+            </View>
 
-            <Pressable
-              style={styles.switchVehBtn}
-              onPress={() => setVehiclePickerVisible(true)}
-            >
-              <Text style={styles.switchVehText}>Change or Add Vehicle</Text>
-            </Pressable>
+            <View style={styles.garageVehicleRow}>
+              <Text style={styles.garageVehicleEmoji}>{selectedVehicle?.icon || '🚗'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.garageVehicleName}>
+                  {selectedVehicle?.name || 'Tata Nexon EV'}
+                </Text>
+                <Text style={styles.garageVehiclePlate}>
+                  {selectedVehicle?.plateNumber || 'MP 04 AB 1234'} • {selectedVehicle?.connectorType || 'CCS2'}
+                </Text>
+              </View>
+              <View style={styles.garageBatteryPill}>
+                <Text style={styles.garageBatteryText}>
+                  {selectedVehicle?.batteryCapacityKwh || 40.5} kWh
+                </Text>
+              </View>
+            </View>
           </View>
 
+          {/* Society EV Tariff Policy Card */}
+          <View style={styles.profileSectionCard}>
+            <Text style={styles.profileSectionTitle}>Society EV Tariff Policy</Text>
+            <Text style={styles.profileSectionSub}>
+              Approved by Apartment RWA & Building Management
+            </Text>
+
+            <View style={styles.tariffPolicyGrid}>
+              <View style={styles.tariffPolicyCol}>
+                <Text style={styles.tariffPolicyLabel}>Immediate Walk-in</Text>
+                <Text style={styles.tariffPolicyVal}>₹15 <Text style={styles.tariffUnit}>/ kWh</Text></Text>
+                <Text style={styles.tariffPolicyDesc}>Instant plug & charge</Text>
+              </View>
+              <View style={styles.tariffPolicyDivider} />
+              <View style={styles.tariffPolicyCol}>
+                <Text style={styles.tariffPolicyLabel}>Advance Reserve</Text>
+                <Text style={styles.tariffPolicyValGreen}>₹11 <Text style={styles.tariffUnit}>/ kWh</Text></Text>
+                <Text style={styles.tariffPolicyDescDiscount}>Save ₹4/kWh off-peak</Text>
+              </View>
+            </View>
+
+            <View style={styles.policyLedgerNotice}>
+              <Text style={styles.policyLedgerIcon}>📋</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.policyLedgerTitle}>Monthly Maintenance Ledger</Text>
+                <Text style={styles.policyLedgerText}>
+                  No wallet balance or card payment needed. All charging energy consumed is consolidated into your flat's monthly maintenance statement.
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Basement Parking & Security Helpdesk */}
+          <View style={styles.profileSectionCard}>
+            <Text style={styles.profileSectionTitle}>Basement Security & Helpdesk</Text>
+            <View style={styles.helpdeskItem}>
+              <Text style={styles.helpdeskIcon}>👮</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.helpdeskTitle}>Basement 2 Guard Station</Text>
+                <Text style={styles.helpdeskSubtitle}>Intercom: Ext 104 • Bay blocking & physical assistance</Text>
+              </View>
+            </View>
+            <View style={styles.helpdeskItem}>
+              <Text style={styles.helpdeskIcon}>🏢</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.helpdeskTitle}>Society Facility Manager</Text>
+                <Text style={styles.helpdeskSubtitle}>Intercom: Ext 101 • Charger maintenance & reset</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* App Version & Logout */}
+          <Text style={styles.appVersionText}>tBits Plug • Apartment Community v2.4</Text>
           <Pressable
-            style={styles.logoutBtn}
+            style={styles.signOutBtn}
             onPress={async () => {
               await logout();
               router.replace('/');
             }}
           >
-            <Text style={styles.logoutBtnText}>Sign Out</Text>
+            <Text style={styles.signOutBtnText}>Sign Out of Apartment Account</Text>
           </Pressable>
         </ScrollView>
       )}
@@ -672,8 +785,8 @@ export default function HomeScreen() {
           style={styles.tabBtn}
           onPress={() => setActiveTab('HOME')}
         >
-          <Text style={[styles.tabIcon, activeTab === 'HOME' && styles.tabActiveText]}>⚡</Text>
-          <Text style={[styles.tabLabel, activeTab === 'HOME' && styles.tabActiveText]}>Chargers</Text>
+          <Text style={[styles.tabIcon, activeTab === 'HOME' && styles.tabActiveText]}>🏠</Text>
+          <Text style={[styles.tabLabel, activeTab === 'HOME' && styles.tabActiveText]}>Home</Text>
         </Pressable>
 
         <Pressable
@@ -686,10 +799,10 @@ export default function HomeScreen() {
 
         <Pressable
           style={styles.tabBtn}
-          onPress={() => setActiveTab('SETTINGS')}
+          onPress={() => setActiveTab('PROFILE')}
         >
-          <Text style={[styles.tabIcon, activeTab === 'SETTINGS' && styles.tabActiveText]}>⚙️</Text>
-          <Text style={[styles.tabLabel, activeTab === 'SETTINGS' && styles.tabActiveText]}>Settings</Text>
+          <Text style={[styles.tabIcon, activeTab === 'PROFILE' && styles.tabActiveText]}>👤</Text>
+          <Text style={[styles.tabLabel, activeTab === 'PROFILE' && styles.tabActiveText]}>Profile</Text>
         </Pressable>
       </View>
 
@@ -990,6 +1103,241 @@ export default function HomeScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      {/* -------------------------------------------------------------
+          CUSTOM DIALOG 1: SESSION STARTED POPUP
+      -------------------------------------------------------------- */}
+      <Modal
+        visible={sessionStartedModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSessionStartedModalVisible(false)}
+      >
+        <View style={styles.customDialogOverlay}>
+          <View style={styles.customDialogCard}>
+            <View style={styles.dialogIconRingGreen}>
+              <Text style={styles.dialogIconEmoji}>⚡</Text>
+            </View>
+            <Text style={styles.dialogTitle}>Charging Session Started!</Text>
+            <Text style={styles.dialogSubtitle}>
+              Electricity is now actively flowing into your EV.
+            </Text>
+
+            <View style={styles.dialogDetailsBox}>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Charger & Bay</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {activeSessionCharger?.name || 'Charger C1'} ({activeSessionCharger?.bayNumber || 'Bay 01'})
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Tariff Applied</Text>
+                <Text style={styles.dialogDetailValueGreen}>
+                  ₹{activeSessionCharger?.walkInRatePerKwh || 15}/kWh (Walk-in)
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Target Vehicle</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {selectedVehicle?.name || 'Tata Nexon EV'} ({selectedVehicle?.plateNumber || 'MP 04 AB 1234'})
+                </Text>
+              </View>
+              <View style={styles.dialogLedgerNotice}>
+                <Text style={styles.dialogLedgerIcon}>📋</Text>
+                <Text style={styles.dialogLedgerText}>
+                  Billed to your flat maintenance account. No immediate card or UPI payment required.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={styles.dialogPrimaryBtn}
+              onPress={() => setSessionStartedModalVisible(false)}
+            >
+              <Text style={styles.dialogPrimaryBtnText}>View Live Session</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* -------------------------------------------------------------
+          CUSTOM DIALOG 2: STOP CHARGING CONFIRMATION POPUP
+      -------------------------------------------------------------- */}
+      <Modal
+        visible={stopConfirmModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setStopConfirmModalVisible(false)}
+      >
+        <View style={styles.customDialogOverlay}>
+          <View style={styles.customDialogCard}>
+            <View style={styles.dialogIconRingAmber}>
+              <Text style={styles.dialogIconEmoji}>⚠️</Text>
+            </View>
+            <Text style={styles.dialogTitle}>Stop Charging Session?</Text>
+            <Text style={styles.dialogSubtitle}>
+              Power delivery will cease immediately. The delivered energy will be logged to your flat maintenance ledger.
+            </Text>
+
+            <View style={styles.dialogDetailsBox}>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Energy Delivered</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {deliveredKwh.toFixed(2)} kWh
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Elapsed Time</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {formattedElapsedTime}
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Current Amount</Text>
+                <Text style={styles.dialogDetailValueGreen}>
+                  ₹{(deliveredKwh * (activeSessionCharger?.walkInRatePerKwh || 15)).toFixed(2)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.dialogBtnRow}>
+              <Pressable
+                style={styles.dialogGhostBtn}
+                onPress={() => setStopConfirmModalVisible(false)}
+              >
+                <Text style={styles.dialogGhostBtnText}>Keep Charging</Text>
+              </Pressable>
+              <Pressable
+                style={styles.dialogDestructiveBtn}
+                onPress={handleExecuteStopSession}
+              >
+                <Text style={styles.dialogDestructiveBtnText}>Yes, Stop</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* -------------------------------------------------------------
+          CUSTOM DIALOG 3: SESSION COMPLETED RECEIPT POPUP
+      -------------------------------------------------------------- */}
+      <Modal
+        visible={sessionSummaryModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSessionSummaryModalVisible(false)}
+      >
+        <View style={styles.customDialogOverlay}>
+          <View style={styles.customDialogCard}>
+            <View style={styles.dialogIconRingGreen}>
+              <Text style={styles.dialogIconEmoji}>🏁</Text>
+            </View>
+            <Text style={styles.dialogTitle}>Session Completed!</Text>
+            <Text style={styles.dialogSubtitle}>
+              Please unplug the connector and free the parking bay for your neighbors.
+            </Text>
+
+            <View style={styles.dialogDetailsBox}>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Charger Bay</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {completedSessionData?.chargerName} ({completedSessionData?.bayNumber})
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Units Delivered</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {completedSessionData?.deliveredKwh.toFixed(2)} kWh
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Duration</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {completedSessionData?.durationMins} mins
+                </Text>
+              </View>
+              <View style={styles.dialogDetailDivider} />
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailTotalLabel}>Total Session Bill</Text>
+                <Text style={styles.dialogDetailTotalValue}>
+                  ₹{completedSessionData?.totalBill}
+                </Text>
+              </View>
+
+              <View style={styles.dialogLedgerSuccessBox}>
+                <Text style={styles.dialogLedgerSuccessIcon}>✓</Text>
+                <Text style={styles.dialogLedgerSuccessText}>
+                  Logged to Flat Tower A-402 Society Maintenance Ledger.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={styles.dialogPrimaryBtn}
+              onPress={() => setSessionSummaryModalVisible(false)}
+            >
+              <Text style={styles.dialogPrimaryBtnText}>Done & Free Bay</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* -------------------------------------------------------------
+          CUSTOM DIALOG 4: RESERVATION SUCCESS POPUP
+      -------------------------------------------------------------- */}
+      <Modal
+        visible={reservationConfirmedModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setReservationConfirmedModalVisible(false)}
+      >
+        <View style={styles.customDialogOverlay}>
+          <View style={styles.customDialogCard}>
+            <View style={styles.dialogIconRingBlue}>
+              <Text style={styles.dialogIconEmoji}>📅</Text>
+            </View>
+            <Text style={styles.dialogTitle}>Slot Reserved Successfully!</Text>
+            <Text style={styles.dialogSubtitle}>
+              Your advance charging slot is confirmed.
+            </Text>
+
+            <View style={styles.dialogDetailsBox}>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Charger</Text>
+                <Text style={styles.dialogDetailValue}>
+                  {confirmedReservationData?.chargerName}
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Scheduled Time</Text>
+                <Text style={styles.dialogDetailValueBlue}>
+                  {confirmedReservationData?.slotTime}
+                </Text>
+              </View>
+              <View style={styles.dialogDetailRow}>
+                <Text style={styles.dialogDetailLabel}>Discounted Tariff</Text>
+                <Text style={styles.dialogDetailValueGreen}>
+                  ₹{confirmedReservationData?.rate}/kWh (Save ₹{confirmedReservationData?.savings}/kWh)
+                </Text>
+              </View>
+
+              <View style={styles.dialogLedgerNotice}>
+                <Text style={styles.dialogLedgerIcon}>ℹ️</Text>
+                <Text style={styles.dialogLedgerText}>
+                  Please arrive on time. Power used will be charged to your society maintenance bill.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={styles.dialogPrimaryBtn}
+              onPress={() => setReservationConfirmedModalVisible(false)}
+            >
+              <Text style={styles.dialogPrimaryBtnText}>Got it</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1014,9 +1362,9 @@ const styles = StyleSheet.create({
   },
   brandLogo: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#2563EB',
-    letterSpacing: -0.5,
+    letterSpacing: -0.3,
   },
   headerRightActions: {
     flexDirection: 'row',
@@ -1044,7 +1392,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  unreadBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
+  unreadBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600' },
   profileAvatar: {
     width: 38,
     height: 38,
@@ -1053,7 +1401,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  profileAvatarText: { color: '#1D4ED8', fontWeight: '700', fontSize: 15 },
+  profileAvatarText: { color: '#1D4ED8', fontWeight: '600', fontSize: 15 },
 
   // Greeting
   greetingRow: {
@@ -1063,7 +1411,7 @@ const styles = StyleSheet.create({
   },
   greetingTitle: {
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0F172A',
   },
   greetingSubtitle: {
@@ -1088,9 +1436,9 @@ const styles = StyleSheet.create({
   },
   vehiclePillEmoji: { fontSize: 18 },
   vehiclePillTextCol: { flexShrink: 1 },
-  vehiclePillName: { fontSize: 12, fontWeight: '700', color: '#1E3A8A' },
-  vehiclePillPlate: { fontSize: 10, color: '#3B82F6', fontWeight: '600' },
-  vehiclePillArrow: { fontSize: 12, color: '#2563EB', fontWeight: '800' },
+  vehiclePillName: { fontSize: 12, fontWeight: '600', color: '#1E3A8A' },
+  vehiclePillPlate: { fontSize: 10, color: '#3B82F6', fontWeight: '500' },
+  vehiclePillArrow: { fontSize: 12, color: '#2563EB', fontWeight: '600' },
 
   mainScroll: { paddingHorizontal: 20, paddingTop: 16 },
 
@@ -1108,11 +1456,11 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   guideHeading: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#475569',
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     marginBottom: 12,
   },
   stepsRow: {
@@ -1130,33 +1478,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 6,
   },
-  stepNumber: { fontSize: 13, fontWeight: '800', color: '#2563EB' },
-  stepTitle: { fontSize: 12, fontWeight: '700', color: '#0F172A', textAlign: 'center' },
+  stepNumber: { fontSize: 13, fontWeight: '600', color: '#2563EB' },
+  stepTitle: { fontSize: 12, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
   stepSub: { fontSize: 10, color: '#64748B', textAlign: 'center', marginTop: 1 },
   stepArrow: { paddingBottom: 14 },
-  arrowText: { fontSize: 14, color: '#CBD5E1', fontWeight: '700' },
+  arrowText: { fontSize: 14, color: '#CBD5E1', fontWeight: '600' },
 
-  // Dynamic Live Hero Card
+  // Dynamic Live Hero Card (Crisp White + Emerald Theme)
   liveHeroCard: {
-    backgroundColor: '#0F172A',
-    borderRadius: 24,
-    padding: 22,
-    marginBottom: 24,
-    shadowColor: '#0284C7',
-    shadowOpacity: 0.2,
-    shadowRadius: 15,
-    elevation: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 20,
+    marginBottom: 22,
+    borderWidth: 1.5,
+    borderColor: '#BBF7D0',
+    shadowColor: '#10B981',
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 3,
   },
   liveHeroTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   liveHeroTagRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 12,
@@ -1169,18 +1521,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#10B981',
   },
   liveHeroTagText: {
-    color: '#34D399',
+    color: '#059669',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: 0.5,
   },
-  liveHeroBay: { color: '#94A3B8', fontSize: 13, fontWeight: '600' },
+  liveHeroBay: { color: '#64748B', fontSize: 13, fontWeight: '500' },
 
-  // Gauge
+  // Gauge (Light Theme with Emerald Dial)
   gaugeContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 14,
+    marginVertical: 10,
     height: 180,
   },
   gaugePulseRing: {
@@ -1189,46 +1541,48 @@ const styles = StyleSheet.create({
     height: 170,
     borderRadius: 85,
     borderWidth: 2,
-    borderColor: '#38BDF8',
-    opacity: 0.4,
+    borderColor: '#34D399',
+    opacity: 0.35,
   },
   gaugeCenterDisc: {
     width: 148,
     height: 148,
     borderRadius: 74,
-    backgroundColor: '#1E293B',
+    backgroundColor: '#F0FDF4',
     borderWidth: 3,
-    borderColor: '#0284C7',
+    borderColor: '#10B981',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#38BDF8',
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
+    shadowColor: '#10B981',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
   },
-  gaugeBigEnergy: { fontSize: 32, fontWeight: '900', color: '#FFFFFF' },
-  gaugeUnit: { fontSize: 12, color: '#94A3B8', fontWeight: '500', marginTop: -2 },
+  gaugeBigEnergy: { fontSize: 32, fontWeight: '700', color: '#0F172A' },
+  gaugeUnit: { fontSize: 12, color: '#64748B', fontWeight: '500', marginTop: -2 },
   gaugePowerTag: {
-    backgroundColor: 'rgba(2, 132, 199, 0.25)',
-    borderRadius: 10,
+    backgroundColor: '#E0F2FE',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 3,
     marginTop: 6,
   },
-  gaugePowerText: { fontSize: 11, fontWeight: '700', color: '#38BDF8' },
+  gaugePowerText: { fontSize: 11, fontWeight: '600', color: '#0284C7' },
 
   // Progress Bar
-  progressBarWrapper: { marginTop: 10, marginBottom: 18 },
+  progressBarWrapper: { marginTop: 10, marginBottom: 16 },
   progressBarLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-  progressLabel: { fontSize: 12, color: '#94A3B8', fontWeight: '600' },
-  progressPercent: { fontSize: 12, color: '#38BDF8', fontWeight: '800' },
+  progressLabel: { fontSize: 12, color: '#64748B', fontWeight: '500' },
+  progressPercent: { fontSize: 12, color: '#059669', fontWeight: '600' },
   progressTrack: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#334155',
+    backgroundColor: '#E2E8F0',
     overflow: 'hidden',
   },
   progressFill: {
@@ -1240,30 +1594,30 @@ const styles = StyleSheet.create({
   // Metrics Grid
   metricsGrid: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    paddingVertical: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    paddingVertical: 12,
     alignItems: 'center',
-    marginBottom: 18,
+    marginBottom: 16,
   },
   metricBox: { flex: 1, alignItems: 'center' },
-  metricLabel: { fontSize: 11, color: '#94A3B8', fontWeight: '500' },
-  metricVal: { fontSize: 14, fontWeight: '800', color: '#FFFFFF', marginTop: 4 },
-  metricValCost: { fontSize: 15, fontWeight: '900', color: '#34D399', marginTop: 3 },
-  metricDivider: { width: 1, height: 28, backgroundColor: '#334155' },
+  metricLabel: { fontSize: 11, color: '#64748B', fontWeight: '500' },
+  metricVal: { fontSize: 14, fontWeight: '600', color: '#0F172A', marginTop: 3 },
+  metricValCost: { fontSize: 15, fontWeight: '700', color: '#059669', marginTop: 3 },
+  metricDivider: { width: 1, height: 26, backgroundColor: '#E2E8F0' },
 
   stopChargingBtn: {
-    height: 48,
-    backgroundColor: '#DC2626',
-    borderRadius: 14,
+    height: 46,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#DC2626',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  stopChargingBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  stopChargingBtnText: { color: '#DC2626', fontSize: 14, fontWeight: '600' },
 
   // Section Header & Filters
   sectionHeaderRow: {
@@ -1272,7 +1626,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  sectionTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A' },
+  sectionTitle: { fontSize: 17, fontWeight: '600', color: '#0F172A' },
   sectionSub: { fontSize: 12, color: '#64748B', marginTop: 1 },
   simulatePill: {
     backgroundColor: '#EFF6FF',
@@ -1282,7 +1636,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  simulatePillText: { fontSize: 11, fontWeight: '700', color: '#2563EB' },
+  simulatePillText: { fontSize: 11, fontWeight: '600', color: '#2563EB' },
 
   filterRow: {
     flexDirection: 'row',
@@ -1302,8 +1656,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563EB',
     borderColor: '#2563EB',
   },
-  filterChipText: { fontSize: 12, fontWeight: '600', color: '#64748B' },
-  filterChipTextActive: { color: '#FFFFFF', fontWeight: '700' },
+  filterChipText: { fontSize: 12, fontWeight: '500', color: '#64748B' },
+  filterChipTextActive: { color: '#FFFFFF', fontWeight: '600' },
 
   // Charger Cards
   chargerList: { gap: 14 },
@@ -1325,14 +1679,14 @@ const styles = StyleSheet.create({
   },
   chargerMetaCol: { flex: 1, marginRight: 8 },
   chargerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chargerName: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  chargerName: { fontSize: 16, fontWeight: '600', color: '#0F172A' },
   bayBadge: {
     backgroundColor: '#F1F5F9',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
   },
-  bayBadgeText: { fontSize: 11, fontWeight: '700', color: '#475569' },
+  bayBadgeText: { fontSize: 11, fontWeight: '600', color: '#475569' },
   chargerSubDetail: { fontSize: 13, color: '#64748B', marginTop: 4, fontWeight: '500' },
 
   // Status Pills
@@ -1351,7 +1705,7 @@ const styles = StyleSheet.create({
   statusDotAvailable: { backgroundColor: '#16A34A' },
   statusDotOccupied: { backgroundColor: '#D97706' },
   statusDotReserved: { backgroundColor: '#64748B' },
-  statusText: { fontSize: 11, fontWeight: '800' },
+  statusText: { fontSize: 11, fontWeight: '600' },
   statusTextAvailable: { color: '#15803D' },
   statusTextOccupied: { color: '#B45309' },
   statusTextReserved: { color: '#475569' },
@@ -1365,34 +1719,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     marginTop: 10,
   },
-  compatibleText: { fontSize: 11, color: '#15803D', fontWeight: '700' },
+  compatibleText: { fontSize: 11, color: '#15803D', fontWeight: '600' },
 
-  // Dual Pricing Comparison Box
-  pricingComparisonBox: {
+  // Minimal Dual-Pricing Row (Change #6)
+  minimalPricingBox: {
     flexDirection: 'row',
     backgroundColor: '#F8FAFC',
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     marginTop: 12,
     borderWidth: 1,
     borderColor: '#EDF2F7',
+    alignItems: 'center',
   },
-  pricingCol: { flex: 1, paddingHorizontal: 4 },
-  pricingHeader: { fontSize: 11, fontWeight: '700', color: '#64748B' },
-  walkInPriceText: { fontSize: 17, fontWeight: '900', color: '#0F172A', marginTop: 2 },
-  reservationPriceText: { fontSize: 17, fontWeight: '900', color: '#16A34A', marginTop: 2 },
-  perKwh: { fontSize: 11, color: '#64748B', fontWeight: '500' },
-  pricingNote: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
-  pricingNoteDiscount: { fontSize: 10, color: '#16A34A', fontWeight: '700', marginTop: 2 },
-  pricingDivider: { width: 1, backgroundColor: '#E2E8F0', marginHorizontal: 8 },
-  discountRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  saveBadge: {
+  minimalPriceCol: { flex: 1 },
+  minimalPriceLabel: { fontSize: 11, fontWeight: '500', color: '#64748B' },
+  minimalPriceVal: { fontSize: 15, fontWeight: '600', color: '#0F172A', marginTop: 2 },
+  minimalPriceValGreen: { fontSize: 15, fontWeight: '600', color: '#16A34A', marginTop: 2 },
+  minimalPriceUnit: { fontSize: 11, color: '#64748B', fontWeight: '400' },
+  minimalPriceDivider: { width: 1, height: 26, backgroundColor: '#E2E8F0', marginHorizontal: 12 },
+  minimalSaveRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  minimalSaveBadge: {
     backgroundColor: '#DCFCE7',
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 4,
   },
-  saveBadgeText: { fontSize: 9, fontWeight: '800', color: '#15803D' },
+  minimalSaveBadgeText: { fontSize: 9, fontWeight: '600', color: '#15803D' },
 
   // Card Footer
   cardFooter: {
@@ -1404,7 +1758,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
-  occupiedEstimate: { fontSize: 12, color: '#D97706', fontWeight: '700' },
+  occupiedEstimate: { fontSize: 12, color: '#D97706', fontWeight: '600' },
   actionBtn: {
     height: 40,
     paddingHorizontal: 16,
@@ -1415,7 +1769,7 @@ const styles = StyleSheet.create({
   },
   actionBtnStart: { backgroundColor: '#16A34A' },
   actionBtnReserve: { backgroundColor: '#2563EB' },
-  actionBtnText: { fontSize: 13, fontWeight: '800' },
+  actionBtnText: { fontSize: 13, fontWeight: '600' },
   actionBtnTextStart: { color: '#FFFFFF' },
   actionBtnTextReserve: { color: '#FFFFFF' },
 
@@ -1437,8 +1791,8 @@ const styles = StyleSheet.create({
   },
   tabBtn: { flex: 1, alignItems: 'center' },
   tabIcon: { fontSize: 20 },
-  tabLabel: { fontSize: 11, fontWeight: '600', color: '#64748B', marginTop: 2 },
-  tabActiveText: { color: '#2563EB', fontWeight: '800' },
+  tabLabel: { fontSize: 11, fontWeight: '500', color: '#64748B', marginTop: 2 },
+  tabActiveText: { color: '#2563EB', fontWeight: '600' },
 
   // Start Charging Modal
   modalSafe: { flex: 1, backgroundColor: '#FFFFFF' },
@@ -1451,7 +1805,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
   },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
   modalSub: { fontSize: 13, color: '#64748B', marginTop: 2 },
   modalCloseBtn: {
     width: 32,
@@ -1461,7 +1815,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalCloseText: { fontSize: 14, color: '#64748B', fontWeight: '700' },
+  modalCloseText: { fontSize: 14, color: '#64748B', fontWeight: '600' },
   modalBody: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 },
 
   modeTabs: {
@@ -1486,12 +1840,12 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   modeTabEmoji: { fontSize: 18, marginBottom: 2 },
-  modeTabText: { fontSize: 12, fontWeight: '600', color: '#64748B' },
-  modeTabTextActive: { color: '#0F172A', fontWeight: '800' },
+  modeTabText: { fontSize: 12, fontWeight: '500', color: '#64748B' },
+  modeTabTextActive: { color: '#0F172A', fontWeight: '600' },
   modeTabRate: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
-  modeTabRateActive: { color: '#2563EB', fontWeight: '700' },
+  modeTabRateActive: { color: '#2563EB', fontWeight: '600' },
   modeTabRateDiscount: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
-  modeTabRateDiscountActive: { color: '#16A34A', fontWeight: '800' },
+  modeTabRateDiscountActive: { color: '#16A34A', fontWeight: '600' },
 
   discountCallout: {
     flexDirection: 'row',
@@ -1505,7 +1859,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   discountCalloutIcon: { fontSize: 20 },
-  discountCalloutTitle: { fontSize: 13, fontWeight: '800', color: '#15803D' },
+  discountCalloutTitle: { fontSize: 13, fontWeight: '600', color: '#15803D' },
   discountCalloutSub: { fontSize: 11, color: '#166534', marginTop: 2 },
 
   walkInCallout: {
@@ -1520,12 +1874,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   walkInCalloutIcon: { fontSize: 20 },
-  walkInCalloutTitle: { fontSize: 13, fontWeight: '800', color: '#1E40AF' },
+  walkInCalloutTitle: { fontSize: 13, fontWeight: '600', color: '#1E40AF' },
   walkInCalloutSub: { fontSize: 11, color: '#1E3A8A', marginTop: 2 },
 
   fieldLabel: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#334155',
     marginBottom: 8,
     marginTop: 6,
@@ -1544,8 +1898,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#EFF6FF',
     borderColor: '#2563EB',
   },
-  slotChipText: { fontSize: 13, color: '#475569', fontWeight: '600' },
-  slotChipTextActive: { color: '#2563EB', fontWeight: '800' },
+  slotChipText: { fontSize: 13, color: '#475569', fontWeight: '500' },
+  slotChipTextActive: { color: '#2563EB', fontWeight: '600' },
 
   energyInputRow: {
     flexDirection: 'row',
@@ -1560,10 +1914,10 @@ const styles = StyleSheet.create({
   energyInput: {
     flex: 1,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0F172A',
   },
-  energyUnitSuffix: { fontSize: 14, fontWeight: '700', color: '#64748B' },
+  energyUnitSuffix: { fontSize: 14, fontWeight: '600', color: '#64748B' },
 
   presetChipsRow: {
     flexDirection: 'row',
@@ -1579,8 +1933,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F5F9',
   },
   presetChipActive: { backgroundColor: '#2563EB' },
-  presetChipText: { fontSize: 12, fontWeight: '600', color: '#475569' },
-  presetChipTextActive: { color: '#FFFFFF', fontWeight: '800' },
+  presetChipText: { fontSize: 12, fontWeight: '500', color: '#475569' },
+  presetChipTextActive: { color: '#FFFFFF', fontWeight: '600' },
 
   estimateBox: {
     backgroundColor: '#F8FAFC',
@@ -1592,56 +1946,329 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   estimateRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  estimateLabel: { fontSize: 13, color: '#64748B', fontWeight: '500' },
-  estimateValue: { fontSize: 13, color: '#0F172A', fontWeight: '700' },
+  estimateLabel: { fontSize: 13, color: '#64748B', fontWeight: '400' },
+  estimateValue: { fontSize: 13, color: '#0F172A', fontWeight: '600' },
   estimateDivider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 4 },
-  estimateTotalLabel: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
-  estimateTotalValue: { fontSize: 18, fontWeight: '900', color: '#16A34A' },
+  estimateTotalLabel: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
+  estimateTotalValue: { fontSize: 18, fontWeight: '700', color: '#16A34A' },
 
   confirmCtaBtn: {
-    height: 52,
+    height: 50,
     backgroundColor: '#2563EB',
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#2563EB',
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 3,
     marginBottom: 30,
   },
-  confirmCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  confirmCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
 
-  // Settings
-  settingsCard: {
+  // Profile Hub Styles (Change #5)
+  profileHeroCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 18,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    marginBottom: 16,
+    marginBottom: 14,
+    shadowColor: '#000000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  settingsTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A', marginBottom: 12 },
-  profileRow: { fontSize: 14, color: '#475569', marginBottom: 8 },
-  bold: { fontWeight: '700', color: '#0F172A' },
-  switchVehBtn: {
-    backgroundColor: '#EFF6FF',
-    paddingVertical: 10,
-    borderRadius: 10,
+  profileHeroHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
+    gap: 14,
   },
-  switchVehText: { color: '#2563EB', fontWeight: '700', fontSize: 13 },
-  logoutBtn: {
-    height: 48,
-    backgroundColor: '#FEE2E2',
+  profileAvatarLarge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#DBEAFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileAvatarLargeText: {
+    color: '#1D4ED8',
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  profileNameCol: { flex: 1 },
+  profileFullName: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  profileSubInfo: { fontSize: 13, color: '#64748B', marginTop: 2, fontWeight: '500' },
+  residentBadge: {
+    backgroundColor: '#EFF6FF',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginTop: 6,
+  },
+  residentBadgeText: { fontSize: 11, fontWeight: '600', color: '#2563EB' },
+  profileContactDivider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 12 },
+  profileContactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  profileContactLabel: { fontSize: 12, color: '#64748B' },
+  profileContactValue: { fontSize: 13, fontWeight: '600', color: '#0F172A' },
+
+  profileSectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 14,
+  },
+  profileSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  profileSectionTitle: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
+  profileSectionSub: { fontSize: 12, color: '#64748B', marginTop: 2, marginBottom: 12 },
+  switchVehInlineBtn: {
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  switchVehInlineText: { fontSize: 11, color: '#2563EB', fontWeight: '600' },
+  garageVehicleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+    gap: 12,
+  },
+  garageVehicleEmoji: { fontSize: 26 },
+  garageVehicleName: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
+  garageVehiclePlate: { fontSize: 11, color: '#64748B', marginTop: 2 },
+  garageBatteryPill: {
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  garageBatteryText: { fontSize: 11, fontWeight: '600', color: '#059669' },
+
+  tariffPolicyGrid: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tariffPolicyCol: { flex: 1, alignItems: 'center' },
+  tariffPolicyLabel: { fontSize: 11, color: '#64748B', fontWeight: '500' },
+  tariffPolicyVal: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginTop: 3 },
+  tariffPolicyValGreen: { fontSize: 16, fontWeight: '700', color: '#16A34A', marginTop: 3 },
+  tariffUnit: { fontSize: 11, fontWeight: '400', color: '#64748B' },
+  tariffPolicyDesc: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
+  tariffPolicyDescDiscount: { fontSize: 10, color: '#16A34A', fontWeight: '600', marginTop: 2 },
+  tariffPolicyDivider: { width: 1, height: 36, backgroundColor: '#E2E8F0' },
+
+  policyLedgerNotice: {
+    flexDirection: 'row',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 10,
+    padding: 10,
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  policyLedgerIcon: { fontSize: 14, marginTop: 1 },
+  policyLedgerTitle: { fontSize: 12, fontWeight: '600', color: '#15803D' },
+  policyLedgerText: { fontSize: 11, color: '#166534', marginTop: 2, lineHeight: 16 },
+
+  helpdeskItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    gap: 10,
+  },
+  helpdeskIcon: { fontSize: 20 },
+  helpdeskTitle: { fontSize: 13, fontWeight: '600', color: '#0F172A' },
+  helpdeskSubtitle: { fontSize: 11, color: '#64748B', marginTop: 1 },
+
+  appVersionText: {
+    textAlign: 'center',
+    color: '#94A3B8',
+    fontSize: 11,
+    marginTop: 10,
+    marginBottom: 12,
+  },
+  signOutBtn: {
+    height: 46,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 40,
+    marginBottom: 20,
   },
-  logoutBtnText: { color: '#DC2626', fontWeight: '800', fontSize: 14 },
+  signOutBtnText: { color: '#DC2626', fontWeight: '600', fontSize: 13 },
+
+  // Custom Branded Popups (Change #3)
+  customDialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  customDialogCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 22,
+    width: '100%',
+    maxWidth: 380,
+    alignItems: 'center',
+    shadowColor: '#000000',
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  dialogIconRingGreen: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1.5,
+    borderColor: '#A7F3D0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  dialogIconRingAmber: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1.5,
+    borderColor: '#FDE68A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  dialogIconRingBlue: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  dialogIconEmoji: { fontSize: 24 },
+  dialogTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A', textAlign: 'center' },
+  dialogSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 16,
+    lineHeight: 17,
+  },
+  dialogDetailsBox: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+    marginBottom: 18,
+    gap: 8,
+  },
+  dialogDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dialogDetailLabel: { fontSize: 12, color: '#64748B' },
+  dialogDetailValue: { fontSize: 12, fontWeight: '600', color: '#0F172A' },
+  dialogDetailValueGreen: { fontSize: 12, fontWeight: '600', color: '#16A34A' },
+  dialogDetailValueBlue: { fontSize: 12, fontWeight: '600', color: '#2563EB' },
+  dialogDetailDivider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 4 },
+  dialogDetailTotalLabel: { fontSize: 13, fontWeight: '600', color: '#0F172A' },
+  dialogDetailTotalValue: { fontSize: 16, fontWeight: '700', color: '#16A34A' },
+  dialogLedgerNotice: {
+    flexDirection: 'row',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 4,
+    gap: 6,
+    alignItems: 'center',
+  },
+  dialogLedgerIcon: { fontSize: 12 },
+  dialogLedgerText: { fontSize: 11, color: '#166534', flex: 1, lineHeight: 15 },
+  dialogLedgerSuccessBox: {
+    flexDirection: 'row',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 6,
+    gap: 6,
+    alignItems: 'center',
+  },
+  dialogLedgerSuccessIcon: { fontSize: 12, color: '#16A34A', fontWeight: '700' },
+  dialogLedgerSuccessText: { fontSize: 11, color: '#166534', flex: 1, fontWeight: '500' },
+  dialogPrimaryBtn: {
+    width: '100%',
+    height: 46,
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dialogPrimaryBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  dialogBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  dialogGhostBtn: {
+    flex: 1,
+    height: 46,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dialogGhostBtnText: { color: '#475569', fontSize: 13, fontWeight: '600' },
+  dialogDestructiveBtn: {
+    flex: 1,
+    height: 46,
+    backgroundColor: '#DC2626',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dialogDestructiveBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
 
   // Vehicle Picker Modal
   modalOverlay: {
@@ -1656,7 +2283,7 @@ const styles = StyleSheet.create({
     padding: 20,
     maxHeight: '80%',
   },
-  pickerTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A', marginBottom: 14 },
+  pickerTitle: { fontSize: 17, fontWeight: '600', color: '#0F172A', marginBottom: 14 },
   pickerItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1673,9 +2300,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#EFF6FF',
   },
   pickerEmoji: { fontSize: 24 },
-  pickerName: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  pickerName: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
   pickerSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
-  pickerCheck: { fontSize: 16, color: '#2563EB', fontWeight: '800' },
+  pickerCheck: { fontSize: 16, color: '#2563EB', fontWeight: '600' },
   addVehBtn: {
     paddingVertical: 12,
     alignItems: 'center',
@@ -1683,5 +2310,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F5F9',
     marginTop: 6,
   },
-  addVehBtnText: { fontSize: 13, fontWeight: '700', color: '#2563EB' },
+  addVehBtnText: { fontSize: 13, fontWeight: '600', color: '#2563EB' },
 });
