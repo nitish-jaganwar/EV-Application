@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tBits Plug EV Charging System - Complete Enterprise Schemas",
+  "version": "1.0.0",
+  "description": "Accurate schemas used across Apereo CAS OIDC, CitrineOS CSMS, EVerest Simulator (OCPP 2.0.1 / 2.1), Hasura GraphQL, and Google FCM Push Notifications.",
+  "schemas": {
+    "1_apereo_cas_oidc": {
+      "title": "tBits Apereo CAS OIDC / OAuth 2.0 Authentication Schema",
+      "issuer": "https://cas.mytbits.com/cas/oidc/",
+      "authorizationEndpoint": "https://cas.mytbits.com/cas/oidc/authorize",
+      "tokenEndpoint": "https://cas.mytbits.com/cas/oidc/accessToken",
+      "userinfoEndpoint": "https://cas.mytbits.com/cas/oidc/profile",
+      "idTokenClaims": {
+        "type": "object",
+        "required": ["sub", "preferred_username", "email"],
+        "properties": {
+          "sub": {
+            "type": "string",
+            "description": "Unique user identifier in CAS directory",
+            "example": "nitish"
+          },
+          "preferred_username": {
+            "type": "string",
+            "example": "nitish"
+          },
+          "name": {
+            "type": "string",
+            "example": "Nitish (Resident)"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "resident@apartment.com"
+          },
+          "phone_number": {
+            "type": "string",
+            "example": "+918305763637"
+          },
+          "flat_number": {
+            "type": "string",
+            "description": "Resident society flat assignment",
+            "example": "Tower A - 402"
+          },
+          "idToken": {
+            "type": "string",
+            "description": "Derived CitrineOS resident OCPP authorization token",
+            "example": "FLAT_A402_NITISH"
+          }
+        }
+      }
+    },
+
+    "2_citrineos_postgresql_database": {
+      "title": "CitrineOS PostgreSQL Core Database Schema (Hasura Port 8090)",
+      "tables": {
+        "ChargingStations": {
+          "description": "15 Apartment Parking Bay Stations",
+          "columns": {
+            "id": { "type": "integer", "primaryKey": true, "example": 2 },
+            "ocppConnectionName": { "type": "string", "example": "cp001" },
+            "chargePointVendor": { "type": "string", "example": "tBits" },
+            "chargePointModel": { "type": "string", "example": "EVerestModel" },
+            "protocol": { "type": "string", "example": "OCPP2.0.1" },
+            "isOnline": { "type": "boolean", "example": true },
+            "floorLevel": { "type": "string", "example": "Basement B1" }
+          }
+        },
+        "Authorizations": {
+          "description": "Central RFID / Resident App Authorized Tokens",
+          "columns": {
+            "id": { "type": "integer", "primaryKey": true },
+            "idToken": { "type": "string", "unique": true, "example": "FLAT_A402_NITISH" },
+            "idTokenType": { "type": "string", "enum": ["Central", "ISO14443", "eMAID"], "example": "Central" },
+            "status": { "type": "string", "enum": ["Accepted", "Blocked", "Expired", "Invalid"], "example": "Accepted" },
+            "concurrentTransaction": { "type": "boolean", "example": false },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "updatedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "Transactions": {
+          "description": "Active & Historic Charging Sessions",
+          "columns": {
+            "id": { "type": "integer", "primaryKey": true, "example": 2 },
+            "transactionId": { "type": "string", "format": "uuid", "example": "f25d0f34-db42-4d1e-9542-ff43b7e013e3" },
+            "stationId": { "type": "integer", "foreignKey": "ChargingStations.id", "example": 2 },
+            "evseId": { "type": "integer", "example": 1 },
+            "connectorId": { "type": "integer", "example": 1 },
+            "isActive": { "type": "boolean", "description": "true while power is flowing, false when stopped", "example": false },
+            "chargingState": { "type": "string", "enum": ["Charging", "EVConnected", "SuspendedEV", "SuspendedEVSE", "Idle"], "example": "EVConnected" },
+            "startTime": { "type": "string", "format": "date-time", "example": "2026-10-21T18:41:51+00:00" },
+            "endTime": { "type": "string", "format": "date-time", "example": "2026-10-21T18:43:32+00:00" },
+            "timeSpentCharging": { "type": "integer", "description": "Charging duration in seconds", "example": 101 },
+            "totalKwh": { "type": "number", "description": "Total energy delivered", "example": 0.26 },
+            "stoppedReason": { "type": "string", "enum": ["Remote", "EVDisconnected", "EmergencyStop", "GroundFailure", "Timeout"], "example": "Remote" }
+          }
+        },
+        "MeterValues": {
+          "description": "High-Frequency Periodic Power Meter Telemetry",
+          "columns": {
+            "id": { "type": "integer", "primaryKey": true },
+            "transactionDatabaseId": { "type": "integer", "foreignKey": "Transactions.id" },
+            "timestamp": { "type": "string", "format": "date-time" },
+            "sampledValue": {
+              "type": "array",
+              "items": {
+                "measurand": { "type": "string", "enum": ["Power.Active.Import", "Energy.Active.Import.Register", "Current.Import", "Voltage", "SoC"] },
+                "value": { "type": "number" },
+                "phase": { "type": "string", "enum": ["L1", "L2", "L3", "L1-N", "L2-N", "L3-N"] },
+                "unitOfMeasure": { "type": "object", "properties": { "unit": { "type": "string", "enum": ["W", "Wh", "kWh", "A", "V", "Percent"] } } }
+              }
+            }
+          }
+        },
+        "StatusNotifications": {
+          "description": "OCPP Hardware State Transitions Log",
+          "columns": {
+            "id": { "type": "integer", "primaryKey": true },
+            "stationId": { "type": "string", "example": "cp001" },
+            "evseId": { "type": "integer", "example": 1 },
+            "connectorId": { "type": "integer", "example": 1 },
+            "connectorStatus": { "type": "string", "enum": ["Available", "Occupied", "Reserved", "Unavailable", "Faulted"], "example": "Occupied" },
+            "timestamp": { "type": "string", "format": "date-time" }
+          }
+        }
+      }
+    },
+
+    "3_ocpp_messages": {
+      "title": "OCPP 2.0.1 / 2.1 Protocol Messages (EVerest Simulator <-> CitrineOS)",
+      "endpoints": {
+        "remoteStart": {
+          "httpMethod": "POST",
+          "url": "http://65.21.108.234:8080/ocpp/2.1/evdriver/requestStartTransaction?identifier=cp001&tenantId=1",
+          "requestBody": {
+            "remoteStartId": 101,
+            "idToken": { "idToken": "FLAT_A402_NITISH", "type": "Central" },
+            "evseId": 1
+          },
+          "response": [{ "success": true }]
+        },
+        "remoteStop": {
+          "httpMethod": "POST",
+          "url": "http://65.21.108.234:8080/ocpp/2.1/evdriver/requestStopTransaction?identifier=cp001&tenantId=1",
+          "requestBody": {
+            "transactionId": "f25d0f34-db42-4d1e-9542-ff43b7e013e3"
+          },
+          "response": [{ "success": true }]
+        }
+      }
+    },
+
+    "4_google_fcm_push_notifications": {
+      "title": "Google FCM Push Notification Schema (Android Direct)",
+      "fcmV1Endpoint": "https://fcm.googleapis.com/v1/projects/ev-test-001/messages:send",
+      "googleServicesJsonConfig": {
+        "projectNumber": "821006386950",
+        "projectId": "ev-test-001",
+        "packageName": "com.anonymous.buildingapp"
+      },
+      "notificationEvents": {
+        "charging_started": {
+          "title": "⚡ Charging started",
+          "body": "Your charging session at tBits Bay 01 has started at 10.7 kW speed.",
+          "destination": "LIVE"
+        },
+        "session_ended": {
+          "title": "✅ Charging session ended",
+          "body": "Your session at tBits Bay 01 has ended. Energy delivered: 4.88 kWh. Bill: ₹53.68.",
+          "destination": "RECORDS"
+        },
+        "unplug_reminder": {
+          "title": "⚠️ Please free the charging space",
+          "body": "Your session at tBits Bay 01 has ended and the vehicle is still connected. Please unplug your cable to avoid overstay fees.",
+          "destination": "LIVE"
+        },
+        "charging_full": {
+          "title": "🔋 Battery fully charged",
+          "body": "Full charge has been confirmed at tBits Bay 01. Please unplug when safe and free the space.",
+          "destination": "LIVE"
+        }
+      }
+    }
+  }
+}

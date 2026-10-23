@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { provisionResidentTokenInHasura } from '@/services/hasuraClient';
 
 const memoryStorage: Record<string, string> = {};
 const storage = {
@@ -123,6 +124,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     await storage.setItemAsync(USERS_KEY, JSON.stringify(updatedUsers));
     await storage.setItemAsync(CURRENT_USER_KEY, JSON.stringify(profile));
+
+    // Auto-provision resident idToken in CitrineOS via Hasura
+    provisionResidentTokenInHasura(profile).catch((err) => {
+      console.warn('Background token provisioning skipped:', err);
+    });
   };
 
   const logout = async () => {

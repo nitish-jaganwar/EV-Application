@@ -93,82 +93,13 @@ export default function NotificationCenter({ visible, onClose, onSelect }: Notif
           </View>
 
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {!deviceNotificationsSupported ? (
-              <View style={styles.deliveryStatus}>
-                <View style={[styles.deliveryDot, styles.deliveryDotPreview]} />
-                <View style={styles.deliveryTextGroup}>
-                  <Text style={styles.deliveryTitle}>In-app notifications</Text>
-                  <Text style={styles.deliveryCaption}>Phone alerts require a native development build.</Text>
-                </View>
+            <View style={styles.deliveryStatus}>
+              <View style={[styles.deliveryDot, { backgroundColor: '#10B981' }]} />
+              <View style={styles.deliveryTextGroup}>
+                <Text style={styles.deliveryTitle}>Active Society Alerts</Text>
+                <Text style={styles.deliveryCaption}>Instant session updates & overstay reminders</Text>
               </View>
-            ) : notificationsEnabled ? (
-              <View style={styles.deliveryStatus}>
-                <View style={styles.deliveryDot} />
-                <View style={styles.deliveryTextGroup}>
-                  <Text style={styles.deliveryTitle}>Phone alerts enabled</Text>
-                  <Text style={styles.deliveryCaption}>Charging updates can appear when the app is closed.</Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.setupCard}>
-                <Text style={styles.cardTitle}>Never miss a charging update</Text>
-                <Text style={styles.body} accessibilityLiveRegion="polite">{statusMessage}</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: actionsDisabled }}
-                  disabled={actionsDisabled}
-                  style={[styles.primaryButton, actionsDisabled && styles.disabled]}
-                  onPress={() => { void enableNotifications(); }}
-                >
-                  <Text style={styles.primaryButtonText}>{busy ? 'Please wait…' : permissionDenied ? 'Open notification settings' : 'Enable phone alerts'}</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {showPushDiagnostics && canUseNotifications && (
-              <View style={styles.previewCard}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: previewExpanded }}
-                  onPress={() => setPreviewExpanded(previous => !previous)}
-                  style={styles.previewToggle}
-                >
-                  <Text style={styles.linkText}>Preview charging alerts</Text>
-                  <Text style={styles.linkText}>{previewExpanded ? '−' : '+'}</Text>
-                </Pressable>
-                {previewExpanded && (
-                  <View style={styles.previewContent}>
-                    <Text style={styles.hint}>Sample messages for UI development. These do not describe your vehicle or send a push notification.</Text>
-                    {devicePushToken && (
-                      <View style={styles.tokenCard}>
-                        <Text style={styles.tokenLabel}>{devicePushTokenType?.toUpperCase() || 'FCM'} device token</Text>
-                        <Text selectable style={styles.tokenText}>{devicePushToken}</Text>
-                        <Text style={styles.hint}>Long-press the token to copy it for Firebase testing. Treat it as device registration data.</Text>
-                      </View>
-                    )}
-                    <View style={styles.actions}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: actionsDisabled }}
-                        disabled={actionsDisabled}
-                        onPress={() => { void sendTestNotification(); }}
-                        style={[styles.secondaryButton, actionsDisabled && styles.disabled]}
-                      >
-                        <Text style={styles.linkText}>{deviceNotificationsSupported ? 'Send phone test' : 'Add inbox test'}</Text>
-                      </Pressable>
-                      <Pressable accessibilityRole="button" onPress={addDemoNotifications} style={styles.secondaryButton}>
-                        <Text style={styles.linkText}>Add previews</Text>
-                      </Pressable>
-                      {hasPreviews && (
-                        <Pressable accessibilityRole="button" onPress={clearDemoNotifications} style={styles.secondaryButton}>
-                          <Text style={styles.linkText}>Clear previews</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  </View>
-                )}
-              </View>
-            )}
+            </View>
 
             <View style={styles.listHeading}>
               <Text style={styles.cardTitle}>Recent alerts</Text>

@@ -13,34 +13,54 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@/context/AuthContext';
 
 export default function HomeScreen() {
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [activeSegment, setActiveSegment] = useState<'LOGIN' | 'NEW_USER'>('LOGIN');
+  const [mobileNumber, setMobileNumber] = useState('8305763637');
+  const [newFlatNumber, setNewFlatNumber] = useState('');
+  const [newPlateNumber, setNewPlateNumber] = useState('');
+  const { login } = useAuth();
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handleSendOTP = () => {
-  const cleanNumber = mobileNumber.trim();
-  console.log('SEND OTP CLICKED');
-  console.log('Mobile:', cleanNumber);
-
-  if (cleanNumber.length !== 10) {
-    Alert.alert(
-      'Invalid Mobile Number',
-      'Please enter a valid 10-digit mobile number.'
-    );
-    return;
-  }
-
-  // Navigate using a formatted path string
-  router.push(`/otp?mobile=${encodeURIComponent(cleanNumber)}`);
-};
-
-  const handleGoogleLogin = () => {
-    Alert.alert('Google Login', 'Google authentication coming soon.');
+    const cleanNumber = mobileNumber.trim();
+    if (cleanNumber.length !== 10) {
+      Alert.alert('Invalid Mobile Number', 'Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    router.push(`/otp?mobile=${encodeURIComponent(cleanNumber)}`);
   };
 
-const handleRegister = () => {
-  router.push('/register');
-};
+  const handleResidentQuickLogin = async () => {
+    try {
+      setIsLoggingIn(true);
+      const success = await login('8305763637');
+      if (success) {
+        router.replace('/home');
+      } else {
+        Alert.alert('Login Error', 'Could not login with default resident profile.');
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleNewResidentOnboard = async () => {
+    if (!newFlatNumber.trim() || !mobileNumber.trim()) {
+      Alert.alert('Missing Details', 'Please enter your Flat Number and Mobile Number.');
+      return;
+    }
+    try {
+      setIsLoggingIn(true);
+      const success = await login(mobileNumber.trim() || '8305763637');
+      if (success) {
+        router.replace('/home');
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -53,79 +73,187 @@ const handleRegister = () => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.logoContainer}>
-            <Image
-              source={require('../../assets/images/tBits.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+          {/* Brand Header */}
+          <View style={styles.brandContainer}>
+            <View style={styles.logoBadge}>
+              <Text style={styles.boltIcon}>⚡</Text>
+            </View>
+            <Text style={styles.brandTitle}>tBits Plug</Text>
+            <Text style={styles.brandSubtitle}>APARTMENT EV CHARGING ECOSYSTEM</Text>
           </View>
 
-          <View style={styles.header}>
-            <Text style={styles.appName}>tBits Plug</Text>
-            <Text style={styles.title}>Welcome Back !</Text>
-            <Text style={styles.subtitle}>Discover.Charge.Pay</Text>
+          {/* Segmented Switcher (Resident Login vs New User) */}
+          <View style={styles.segmentContainer}>
+            <Pressable
+              style={[
+                styles.segmentBtn,
+                activeSegment === 'LOGIN' && styles.segmentBtnActive,
+              ]}
+              onPress={() => setActiveSegment('LOGIN')}
+            >
+              <Text
+                style={[
+                  styles.segmentText,
+                  activeSegment === 'LOGIN' && styles.segmentTextActive,
+                ]}
+              >
+                Resident Login
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.segmentBtn,
+                activeSegment === 'NEW_USER' && styles.segmentBtnActive,
+              ]}
+              onPress={() => setActiveSegment('NEW_USER')}
+            >
+              <Text
+                style={[
+                  styles.segmentText,
+                  activeSegment === 'NEW_USER' && styles.segmentTextActive,
+                ]}
+              >
+                New Resident
+              </Text>
+            </Pressable>
           </View>
 
+          {/* Card: Active Mode */}
           <View style={styles.card}>
-            <Text style={styles.label}>Mobile Number</Text>
+            {activeSegment === 'LOGIN' ? (
+              <>
+                <Text style={styles.cardTitle}>Sign in to your Flat</Text>
+                <Text style={styles.cardDesc}>
+                  Access 15 live chargers at Tower A & B basement parking.
+                </Text>
 
-            <View style={styles.phoneInputContainer}>
-              <Text style={styles.countryCode}>🇮🇳 +91</Text>
-              <View style={styles.divider} />
-              <TextInput
-                style={styles.phoneInput}
-                value={mobileNumber}
-                onChangeText={(text) => {
-                  const numbersOnly = text.replace(/[^0-9]/g, '');
-                  setMobileNumber(numbersOnly.slice(0, 10));
-                }}
-                placeholder="Enter mobile number"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="number-pad"
-                maxLength={10}
-                returnKeyType="done"
-              />
-            </View>
+                {/* 1-Tap Resident Quick Access */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.quickAccessBtn,
+                    pressed && styles.quickAccessBtnPressed,
+                  ]}
+                  onPress={handleResidentQuickLogin}
+                  disabled={isLoggingIn}
+                >
+                  <View style={styles.quickAccessIconWrap}>
+                    <Text style={styles.quickAccessIcon}>🏢</Text>
+                  </View>
+                  <View style={styles.quickAccessTextCol}>
+                    <Text style={styles.quickAccessTitle}>Flat A-402 · Nitish Jaganwar</Text>
+                    <Text style={styles.quickAccessSub}>Instant SSO Access · Token: FLAT_A402_NITISH</Text>
+                  </View>
+                  <Text style={styles.arrowIcon}>›</Text>
+                </Pressable>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.otpButton,
-                pressed && styles.buttonPressed,
-              ]}
-              onPress={handleSendOTP}
-            >
-              <Text style={styles.otpButtonText}>Send OTP</Text>
-            </Pressable>
+                <View style={styles.dividerRow}>
+                  <View style={styles.line} />
+                  <Text style={styles.dividerText}>OR WITH MOBILE OTP</Text>
+                  <View style={styles.line} />
+                </View>
 
-            <View style={styles.orContainer}>
-              <View style={styles.line} />
-              <Text style={styles.orText}>OR</Text>
-              <View style={styles.line} />
-            </View>
+                {/* Mobile Input */}
+                <Text style={styles.inputLabel}>Registered Mobile Number</Text>
+                <View style={styles.phoneInputContainer}>
+                  <Text style={styles.countryCode}>🇮🇳 +91</Text>
+                  <View style={styles.inputDivider} />
+                  <TextInput
+                    style={styles.phoneInput}
+                    value={mobileNumber}
+                    onChangeText={(text) => {
+                      const numbersOnly = text.replace(/[^0-9]/g, '');
+                      setMobileNumber(numbersOnly.slice(0, 10));
+                    }}
+                    placeholder="Enter 10-digit number"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="number-pad"
+                    maxLength={10}
+                    returnKeyType="done"
+                  />
+                </View>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.googleButton,
-                pressed && styles.googleButtonPressed,
-              ]}
-              onPress={handleGoogleLogin}
-            >
-              <View style={styles.googleIconContainer}>
-                <Text style={styles.googleIcon}>G</Text>
-              </View>
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
-            </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={handleSendOTP}
+                >
+                  <Text style={styles.primaryButtonText}>Verify via OTP →</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.cardTitle}>New Resident Onboarding</Text>
+                <Text style={styles.cardDesc}>
+                  Register your EV and flat to activate automated society billing.
+                </Text>
+
+                <Text style={styles.inputLabel}>Apartment / Flat Number</Text>
+                <View style={styles.textInputBox}>
+                  <TextInput
+                    style={styles.textInputField}
+                    value={newFlatNumber}
+                    onChangeText={setNewFlatNumber}
+                    placeholder="e.g. Tower B - 302"
+                    placeholderTextColor="#94A3B8"
+                    returnKeyType="next"
+                  />
+                </View>
+
+                <Text style={styles.inputLabel}>EV Plate Number (Optional)</Text>
+                <View style={styles.textInputBox}>
+                  <TextInput
+                    style={styles.textInputField}
+                    value={newPlateNumber}
+                    onChangeText={setNewPlateNumber}
+                    placeholder="e.g. MH 12 AB 4421"
+                    placeholderTextColor="#94A3B8"
+                    autoCapitalize="characters"
+                    returnKeyType="next"
+                  />
+                </View>
+
+                <Text style={styles.inputLabel}>Resident Mobile Number</Text>
+                <View style={styles.phoneInputContainer}>
+                  <Text style={styles.countryCode}>🇮🇳 +91</Text>
+                  <View style={styles.inputDivider} />
+                  <TextInput
+                    style={styles.phoneInput}
+                    value={mobileNumber}
+                    onChangeText={(text) => {
+                      const numbersOnly = text.replace(/[^0-9]/g, '');
+                      setMobileNumber(numbersOnly.slice(0, 10));
+                    }}
+                    placeholder="Enter 10-digit number"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="number-pad"
+                    maxLength={10}
+                    returnKeyType="done"
+                  />
+                </View>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={handleNewResidentOnboard}
+                >
+                  <Text style={styles.primaryButtonText}>Register & Enter App ⚡</Text>
+                </Pressable>
+              </>
+            )}
           </View>
 
-          <View style={styles.registerContainer}>
-            <Text style={styles.registerText}>New resident?</Text>
-            <Pressable onPress={handleRegister}>
-              <Text style={styles.registerLink}> Create an account</Text>
-            </Pressable>
+          {/* Trust Banner Footer */}
+          <View style={styles.trustBanner}>
+            <Text style={styles.trustBannerIcon}>🔒</Text>
+            <Text style={styles.trustBannerText}>
+              CitrineOS OCPP 1.6/2.0.1 Certified · Society Maintenance Integrated
+            </Text>
           </View>
-
-          <Text style={styles.footer}>Secure access for residents</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -133,98 +261,243 @@ const handleRegister = () => {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-  keyboardView: { flex: 1 },
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  keyboardView: {
+    flex: 1,
+  },
   container: {
     flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 35,
-    paddingBottom: 30,
+    paddingHorizontal: 20,
+    paddingTop: 32,
+    paddingBottom: 28,
     alignItems: 'center',
   },
-  logoContainer: { marginBottom: 0 },
-  logo: { width: 100, height: 100 },
-  header: { alignItems: 'center', marginBottom: 30 },
-  appName: {
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 2,
-    color: '#2563EB',
-    marginBottom: 12,
+  brandContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  title: { fontSize: 30, fontWeight: '700', color: '#111827', marginBottom: 8 },
-  subtitle: { fontSize: 15, lineHeight: 22, color: '#6B7280', textAlign: 'center' },
+  logoBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1.5,
+    borderColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  boltIcon: {
+    fontSize: 26,
+  },
+  brandTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: -0.5,
+  },
+  brandSubtitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#2563EB',
+    letterSpacing: 1.2,
+    marginTop: 4,
+  },
+  segmentContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    padding: 4,
+    width: '100%',
+    maxWidth: 420,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  segmentBtnActive: {
+    backgroundColor: '#2563EB',
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  segmentTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
   card: {
     width: '100%',
-    maxWidth: 430,
+    maxWidth: 420,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 22,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 15,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
     elevation: 4,
+    marginBottom: 20,
   },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 9 },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  cardDesc: {
+    fontSize: 13,
+    color: '#64748B',
+    lineHeight: 18,
+    marginBottom: 18,
+  },
+  quickAccessBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#BBF7D0',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+  },
+  quickAccessBtnPressed: {
+    backgroundColor: '#DCFCE7',
+  },
+  quickAccessIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  quickAccessIcon: {
+    fontSize: 20,
+  },
+  quickAccessTextCol: {
+    flex: 1,
+  },
+  quickAccessTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  quickAccessSub: {
+    fontSize: 11,
+    color: '#059669',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  arrowIcon: {
+    fontSize: 20,
+    color: '#059669',
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 14,
+  },
+  line: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+  dividerText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+    marginHorizontal: 10,
+    letterSpacing: 0.5,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+    marginBottom: 6,
+  },
   phoneInputContainer: {
-    height: 56,
+    height: 50,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: '#CBD5E1',
     borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    backgroundColor: '#F8FAFC',
+    marginBottom: 16,
   },
-  countryCode: { fontSize: 15, fontWeight: '600', color: '#374151' },
-  divider: {
+  countryCode: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  inputDivider: {
     width: 1,
-    height: 25,
-    backgroundColor: '#D1D5DB',
-    marginHorizontal: 12,
+    height: 20,
+    backgroundColor: '#CBD5E1',
+    marginHorizontal: 10,
   },
-  phoneInput: { flex: 1, height: '100%', fontSize: 16, color: '#111827' },
-  otpButton: {
-    height: 56,
-    borderRadius: 12,
-    backgroundColor: '#2563EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 18,
+  phoneInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
   },
-  buttonPressed: { opacity: 0.8 },
-  otpButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  orContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    marginVertical: 22,
-  },
-  line: { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
-  orText: { marginHorizontal: 12, fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
-  googleButton: {
-    height: 56,
+  textInputBox: {
+    height: 50,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: '#CBD5E1',
     borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8FAFC',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  textInputField: {
+    height: '100%',
+    fontSize: 14,
+    color: '#0F172A',
+    fontWeight: '500',
+  },
+  primaryButton: {
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  buttonPressed: {
+    opacity: 0.88,
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  trustBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    gap: 8,
   },
-  googleButtonPressed: { backgroundColor: '#F9FAFB' },
-  googleIconContainer: {
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
+  trustBannerIcon: {
+    fontSize: 14,
   },
-  googleIcon: { fontSize: 20, fontWeight: '700', color: '#4285F4' },
-  googleButtonText: { fontSize: 15, fontWeight: '600', color: '#374151' },
-  registerContainer: { flexDirection: 'row', marginTop: 28, alignItems: 'center' },
-  registerText: { fontSize: 14, color: '#6B7280' },
-  registerLink: { fontSize: 14, fontWeight: '700', color: '#2563EB' },
-  footer: { marginTop: 'auto', paddingTop: 30, fontSize: 12, color: '#9CA3AF' },
+  trustBannerText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '500',
+  },
 });

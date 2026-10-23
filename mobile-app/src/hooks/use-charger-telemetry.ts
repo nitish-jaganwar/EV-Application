@@ -61,6 +61,20 @@ export function useChargerTelemetry(chargerId = POC_CHARGER_ID) {
     };
   }, [isAppActive, refresh]);
 
+  const clearActiveSession = useCallback(() => {
+    setTelemetry((prev) =>
+      prev
+        ? {
+            ...prev,
+            transactionId: undefined,
+            transactionEventType: undefined,
+            chargerStatus: 'Finishing',
+            totalPowerW: 0,
+          }
+        : null
+    );
+  }, []);
+
   const lastSeen = telemetry?.lastSeenAt ? Date.parse(telemetry.lastSeenAt) : Number.NaN;
   const isStale = telemetry?.online === false
     || (Number.isFinite(lastSeen) && freshnessClock - lastSeen > STALE_AFTER_MS);
@@ -72,5 +86,6 @@ export function useChargerTelemetry(chargerId = POC_CHARGER_ID) {
     isStale,
     isUsingMock: USE_MOCK_CHARGER,
     refresh: () => refresh(),
+    clearActiveSession,
   };
 }

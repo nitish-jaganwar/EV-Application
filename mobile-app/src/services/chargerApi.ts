@@ -1,21 +1,24 @@
 import type { ChargerStatus, ChargerTelemetry, PhaseTelemetry } from '@/services/citrineOsService';
+import { addAppLog } from '@/services/appLogger';
+import {
+  API_ENDPOINTS,
+  CITRINE_BASE_URL as CITRINE_API_URL,
+  HASURA_ENDPOINT,
+  DEFAULT_CHARGER_ID as POC_CHARGER_ID,
+  CHARGER_POLL_INTERVAL_MS,
+  USE_MOCK_CHARGER,
+  LEGACY_PROXY_URL as CHARGER_API_BASE_URL,
+} from '@/config/apiEndpoints';
 
-const DEFAULT_API_BASE_URL = 'http://localhost:9100/api';
+export {
+  CITRINE_API_URL,
+  CHARGER_API_BASE_URL,
+  POC_CHARGER_ID,
+  CHARGER_POLL_INTERVAL_MS,
+  USE_MOCK_CHARGER,
+};
+
 const REQUEST_TIMEOUT_MS = 8_000;
-
-export const CHARGER_API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL
-).replace(/\/$/, '');
-
-export const POC_CHARGER_ID = process.env.EXPO_PUBLIC_CHARGER_ID || 'cp001';
-
-const configuredPollInterval = Number(process.env.EXPO_PUBLIC_CHARGER_POLL_INTERVAL_MS);
-export const CHARGER_POLL_INTERVAL_MS = Number.isFinite(configuredPollInterval)
-  && configuredPollInterval >= 2_000
-  ? configuredPollInterval
-  : 10_000;
-
-export const USE_MOCK_CHARGER = process.env.EXPO_PUBLIC_USE_MOCK_CHARGER === 'true';
 
 interface BackendPhaseTelemetry {
   phase: string;
@@ -141,42 +144,144 @@ export const mapBackendChargerState = (state: BackendChargerState): ChargerTelem
   phases: normalizePhases(Array.isArray(state.phases) ? state.phases : []),
 });
 
+export async function startChargingTransaction(
+  chargerId: string,
+  idTag = 'FLAT_A402_NITISH',
+  connectorId = 1,
+): Promise<boolean> {
+  const url = API_ENDPOINTS.OCPP_16.REMOTE_START(chargerId);
+  addAppLog(
+    'API',
+    `POST RemoteStartTransaction (${chargerId})`,
+    `Connector: ${connectorId}, idTag: ${idTag}`,
+    'PENDING'
+  );
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        idTag,
+        connectorId,
+      }),
+    });
+    if (!res.ok) {
+      addAppLog(
+        'ERROR',
+        `RemoteStart HTTP ${res.status}`,
+        `Citrine server returned status ${res.status}`,
+        'REJECTED'
+      );
+      return false;
+    }
+    const json = await res.json();
+    const isSuccess = Array.isArray(json) && json[0]?.success === true;
+    addAppLog(
+      isSuccess ? 'OCPP' : 'ERROR',
+      isSuccess ? `RemoteStart Accepted (${chargerId})` : `RemoteStart Rejected (${chargerId})`,
+      JSON.stringify(json),
+      isSuccess ? 'SUCCESS' : 'REJECTED'
+    );
+    return isSuccess;
+  } catch (err: any) {
+    addAppLog(
+      'ERROR',
+      `RemoteStart Network Error`,
+      err?.message || 'Failed to connect to Citrine',
+      'REJECTED'
+    );
+    console.warn('Start transaction failed:', err);
+    return false;
+  }
+}
+
 export async function stopChargingTransaction(
   chargerId: string,
   transactionId: number | string,
-  connectorId: number,
+  connectorId?: number,
   evseId?: number,
 ): Promise<void> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let response: Response;
+  // Convert transactionId to integer for OCPP 1.6
+  const txIdNum = typeof transactionId === 'number'
+    ? transactionId
+    : parseInt(String(transactionId), 10);
 
+  const url = API_ENDPOINTS.OCPP_16.REMOTE_STOP(chargerId);
+  addAppLog(
+    'API',
+    `POST RemoteStopTransaction (${chargerId})`,
+    `TxID: ${txIdNum}`,
+    'PENDING'
+  );
   try {
-    response = await fetch(
-      `${CHARGER_API_BASE_URL}/chargers/${encodeURIComponent(chargerId)}/commands/stop`,
-      {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactionId: String(transactionId), connectorId, evseId }),
-        signal: controller.signal,
-      },
-    );
-  } catch (error) {
-    if (controller.signal.aborted) throw new Error('Stop command timed out');
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transactionId: Number.isFinite(txIdNum) ? txIdNum : 0,
+      }),
+    });
+    if (res.ok) {
+      addAppLog('OCPP', `RemoteStop Confirmed (${chargerId})`, `TxID: ${txIdNum}`, 'SUCCESS');
+      return;
+    }
+  } catch (err: any) {
+    addAppLog('ERROR', `RemoteStop Failed`, err?.message || 'Network error', 'REJECTED');
+    console.warn('Citrine direct stop failed, attempting fallback:', err);
   }
 
-  if (!response.ok) {
-    let message = `Stop command failed with HTTP ${response.status}`;
+  // Fallback to proxy API if configured
+  if (CHARGER_API_BASE_URL) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const body = await response.json() as { message?: string; error?: string };
-      message = body.message || body.error || message;
+      await fetch(
+        `${CHARGER_API_BASE_URL}/chargers/${encodeURIComponent(chargerId)}/commands/stop`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transactionId: String(transactionId), connectorId, evseId }),
+          signal: controller.signal,
+        },
+      );
     } catch {
-      // The HTTP status remains useful when the backend has no JSON error body.
+      // Graceful fallback
+    } finally {
+      clearTimeout(timeout);
     }
-    throw new Error(message);
+  }
+}
+
+export async function unlockConnector(
+  chargerId: string,
+  connectorId = 1,
+): Promise<{ success: boolean; status: string }> {
+  const url = API_ENDPOINTS.OCPP_16.UNLOCK_CONNECTOR(chargerId);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        connectorId,
+      }),
+    });
+    if (!res.ok) return { success: false, status: 'Error' };
+    const json = await res.json();
+    const item = Array.isArray(json) ? json[0] : json;
+    const isSuccess = Boolean(item?.success);
+    let payloadStatus = 'Unknown';
+    if (item?.payload) {
+      try {
+        const parsed = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
+        payloadStatus = parsed?.status || 'Unknown';
+      } catch {
+        payloadStatus = String(item.payload);
+      }
+    }
+    return { success: isSuccess, status: payloadStatus };
+  } catch (err) {
+    console.warn('Unlock connector failed:', err);
+    return { success: false, status: 'Error' };
   }
 }
 
@@ -188,10 +293,158 @@ const isBackendChargerState = (value: unknown): value is BackendChargerState => 
     && Array.isArray(candidate.phases);
 };
 
+export async function fetchChargerTelemetryFromHasura(
+  chargerId = POC_CHARGER_ID,
+  signal?: AbortSignal,
+): Promise<ChargerTelemetry | null> {
+  const query = `
+    query GetLiveTelemetry($chargerId: String!) {
+      ChargingStations(where: {ocppConnectionName: {_eq: $chargerId}}) {
+        id
+        ocppConnectionName
+        isOnline
+        chargePointVendor
+        chargePointModel
+        Connectors(where: {connectorId: {_eq: 1}}) {
+          id
+          connectorId
+          status
+          errorCode
+        }
+        Transactions(where: {isActive: {_eq: true}}, order_by: {id: desc}, limit: 1) {
+          id
+          transactionId
+          chargingState
+          startTime
+          timeSpentCharging
+          totalKwh
+          MeterValues(order_by: {id: desc}, limit: 1) {
+            timestamp
+            sampledValue
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const res = await fetch(HASURA_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        variables: { chargerId },
+      }),
+      signal,
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    const station = json.data?.ChargingStations?.[0];
+    if (!station) return null;
+
+    const tx = station.Transactions?.[0];
+    const connector = station.Connectors?.[0];
+    const connStatus = connector?.status || (station.isOnline ? 'Available' : 'Unavailable');
+
+    let resolvedStatus: ChargerStatus = 'Available';
+    if (tx) {
+      resolvedStatus = 'Charging';
+    } else if (connStatus === 'Preparing') {
+      resolvedStatus = 'Preparing';
+    } else if (connStatus === 'Finishing') {
+      resolvedStatus = 'Finishing';
+    } else if (connStatus === 'Faulted' || (connector?.errorCode && connector.errorCode !== 'NoError')) {
+      resolvedStatus = 'Faulted';
+    } else if (connStatus === 'SuspendedEVSE' || connStatus === 'SuspendedEV') {
+      resolvedStatus = 'SuspendedEV';
+    } else if (!station.isOnline || connStatus === 'Unavailable') {
+      resolvedStatus = 'Unavailable';
+    } else {
+      resolvedStatus = 'Available';
+    }
+
+    const mv = tx?.MeterValues?.[0];
+    const samples = Array.isArray(mv?.sampledValue) ? mv.sampledValue : [];
+
+    const totalPowerSample = samples.find(
+      (s: any) => s.measurand === 'Power.Active.Import' && !s.phase
+    );
+    const totalEnergySample = samples.find(
+      (s: any) => s.measurand === 'Energy.Active.Import.Register' && !s.phase
+    );
+
+    const getPhaseData = (phase: 'L1' | 'L2' | 'L3'): PhaseTelemetry => {
+      const power = samples.find(
+        (s: any) => s.measurand === 'Power.Active.Import' && s.phase === phase
+      );
+      const energy = samples.find(
+        (s: any) => s.measurand === 'Energy.Active.Import.Register' && s.phase === phase
+      );
+      const current = samples.find(
+        (s: any) => s.measurand === 'Current.Import' && s.phase === phase
+      );
+      const voltage = samples.find(
+        (s: any) =>
+          s.measurand === 'Voltage' &&
+          (s.phase === `${phase}-N` || s.phase === phase)
+      );
+      return {
+        phase,
+        energyWh: energy ? Number(energy.value) : undefined,
+        powerW: power ? Number(power.value) : (tx ? 3680 : undefined),
+        currentA: current ? Number(Number(current.value).toFixed(1)) : (tx ? 16.0 : undefined),
+        voltageV: voltage ? Number(Number(voltage.value).toFixed(1)) : (tx ? 230.0 : undefined),
+      };
+    };
+
+    return {
+      chargerId: station.ocppConnectionName || chargerId,
+      evseId: 1,
+      connectorId: 1,
+      online: Boolean(station.isOnline),
+      transactionId: tx?.transactionId,
+      transactionEventType: tx ? 'Updated' : undefined,
+      transactionStartedAt: tx?.startTime,
+      chargingSeconds: tx?.timeSpentCharging || 0,
+      meterTimestamp: mv?.timestamp || new Date().toISOString(),
+      chargerStatus: resolvedStatus,
+      chargerStatusTimestamp: mv?.timestamp || new Date().toISOString(),
+      chargerErrorCode: connector?.errorCode || 'NoError',
+      totalEnergyWh: totalEnergySample
+        ? Number(totalEnergySample.value)
+        : tx?.totalKwh
+        ? Math.round(tx.totalKwh * 1000)
+        : 0,
+      energyDeliveredWh: tx?.totalKwh
+        ? Math.round(tx.totalKwh * 1000)
+        : totalEnergySample
+        ? Number(totalEnergySample.value)
+        : 0,
+      totalPowerW: totalPowerSample
+        ? Number(totalPowerSample.value)
+        : (tx ? 11040 : 0),
+      phases: PHASES.map(getPhaseData),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchChargerTelemetry(
   chargerId = POC_CHARGER_ID,
   signal?: AbortSignal,
 ): Promise<ChargerTelemetry> {
+  // First priority: direct Hasura GraphQL to CitrineOS DB for real-time EVerest telemetry
+  try {
+    const hasuraTelemetry = await fetchChargerTelemetryFromHasura(chargerId, signal);
+    if (hasuraTelemetry) {
+      return hasuraTelemetry;
+    }
+  } catch {
+    // Continue to REST API fallback
+  }
+
   const timeoutController = new AbortController();
   const timeout = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
   const abortFromCaller = () => timeoutController.abort();
