@@ -15,6 +15,7 @@ export type NotificationType =
   | 'charging_nearly_full'
   | 'charging_full'
   | 'unplug_reminder'
+  | 'station_available'
   | 'test';
 
 export interface ChargingNotification {
@@ -34,7 +35,7 @@ const NOTIFICATION_TYPES: readonly NotificationType[] = [
   'charging_started', 'charging_paused', 'charging_resumed', 'charging_interrupted',
   'session_ended', 'charger_fault', 'charger_offline', 'plugged_not_started',
   'booking_confirmed', 'booking_reminder', 'booking_ending', 'charging_nearly_full',
-  'charging_full', 'unplug_reminder', 'test',
+  'charging_full', 'unplug_reminder', 'station_available', 'test',
 ];
 const DESTINATIONS: readonly NotificationDestination[] = ['LIVE', 'SCHEDULE', 'RECORDS'];
 const INBOX_LIMIT = 100;
@@ -174,7 +175,8 @@ export type ChargingNotificationEvent =
   })
   | (SessionEventBase & {
     kind: 'unplug_reminder'; sessionEndedConfirmed: boolean; stillConnectedConfirmed: boolean;
-  });
+  })
+  | (EventBase & { kind: 'station_available' });
 
 function isPositiveMinutes(value: number): boolean {
   return Number.isFinite(value) && value > 0;
@@ -272,6 +274,10 @@ export function buildChargingNotification(event: ChargingNotificationEvent): Cha
       if (event.sessionEndedConfirmed !== true || event.stillConnectedConfirmed !== true) return null;
       title = 'Please free the charging space';
       body = `Your session at ${charger} has ended and the vehicle is still connected. Please unplug when it is safe to do so.`;
+      break;
+    case 'station_available':
+      title = 'Charging bay is free';
+      body = `${charger} is now available. You can park and plug in to charge.`;
       break;
     default:
       return null;

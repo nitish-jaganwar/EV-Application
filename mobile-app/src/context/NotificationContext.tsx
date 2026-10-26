@@ -10,6 +10,7 @@ import {
   clearAccountDeviceNotifications,
   listenForNotifications,
   type NotificationRegistration,
+  presentNativeNotification,
   registerForNotifications,
   scheduleTestNotification,
   setApplicationBadgeCount,
@@ -230,7 +231,14 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       devicePushTokenType: recipientId ? registration.devicePushTokenType : undefined,
       enableNotifications,
       sendTestNotification,
-      receiveNotification: (data) => { const notification = parseNotification(data); if (notification) receive({ ...notification, read: false }); },
+      receiveNotification: (data) => {
+        const notification = parseNotification(data);
+        if (notification) {
+          receive({ ...notification, read: false });
+          // Trigger immediate Android / iOS heads-up notification banner
+          void presentNativeNotification(notification).catch(() => {});
+        }
+      },
       addDemoNotifications: () => {
         if (__DEV__ && recipientId) createDemoScenarioNotifications(recipientId).forEach(receive);
       },

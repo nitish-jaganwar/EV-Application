@@ -26,7 +26,8 @@
       "package": "com.anonymous.buildingapp",
       "ndkVersion": "26.1.10909125",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {

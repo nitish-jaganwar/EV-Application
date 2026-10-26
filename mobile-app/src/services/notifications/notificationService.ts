@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { API_ENDPOINTS } from '@/config/apiEndpoints';
 import {
   type ChargingNotification,
   parseNotification,
@@ -14,6 +15,28 @@ export interface NotificationRegistration {
   message: string;
   devicePushToken?: string;
   devicePushTokenType?: string;
+}
+
+/** Upload FCM push token to the push notification dispatcher service */
+export async function uploadDevicePushToken(
+  token: string,
+  residentId = 'FLAT_A402_NITISH'
+): Promise<boolean> {
+  try {
+    const res = await fetch(API_ENDPOINTS.PUSH.REGISTER_TOKEN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token,
+        residentId,
+        platform: Platform.OS,
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed to upload push token to push service:', err);
+    return false;
+  }
 }
 
 // Expo Go and the web preview use the in-app inbox. Never load native push APIs there.
@@ -86,11 +109,13 @@ export async function registerForNotifications(
   try {
     const token = devicePushToken ?? await notifications.getDevicePushTokenAsync();
     if (typeof token.data !== 'string' || !token.data.trim()) throw new Error('FCM token unavailable');
+    // Automatically register device token with the push dispatcher
+    void uploadDevicePushToken(token.data);
     return {
       permission: 'granted',
       devicePushToken: token.data,
       devicePushTokenType: token.type,
-      message: 'Android notifications are ready. Register this FCM token with the Java backend for live charging alerts.',
+      message: 'Android notifications are ready.',
     };
   } catch {
     return {
@@ -122,6 +147,31 @@ export async function scheduleTestNotification(notification: ChargingNotificatio
       channelId: CHARGING_CHANNEL_ID,
     },
   });
+}
+
+/** Display an immediate OS heads-up alert banner in Android/iOS notification tray. */
+export async function presentNativeNotification(notification: ChargingNotification): Promise<string | null> {
+  const notifications = await getNotifications();
+  if (!notifications) return null;
+  try {
+    await ensureChannel(notifications);
+    const permissions = await notifications.getPermissionsAsync();
+    if (!hasPermission(permissions, notifications)) return null;
+
+    return await notifications.scheduleNotificationAsync({
+      identifier: notification.id,
+      content: {
+        title: notification.title,
+        body: notification.body,
+        sound: 'default',
+        data: toNotificationData(notification),
+      },
+      trigger: null, // null trigger presents notification immediately
+    });
+  } catch (err) {
+    console.warn('Native notification presentation skipped:', err);
+    return null;
+  }
 }
 
 /** Only normalized events addressed to this account can enter its inbox or open a tab. */

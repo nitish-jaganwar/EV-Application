@@ -132,11 +132,12 @@ export default function HomeScreen() {
             : matched.powerKw,
         });
       }
-      if (typeof liveTelemetry.energyDeliveredWh === 'number') {
-        setDeliveredKwh(Number((liveTelemetry.energyDeliveredWh / 1000).toFixed(3)));
+      if (typeof liveTelemetry.energyDeliveredWh === 'number' && liveTelemetry.energyDeliveredWh > 0) {
+        const kwh = Number((liveTelemetry.energyDeliveredWh / 1000).toFixed(3));
+        setDeliveredKwh((prev) => Math.max(prev, kwh));
       }
-      if (typeof liveTelemetry.chargingSeconds === 'number') {
-        setElapsedSeconds(liveTelemetry.chargingSeconds);
+      if (typeof liveTelemetry.chargingSeconds === 'number' && liveTelemetry.chargingSeconds > 0) {
+        setElapsedSeconds((prev) => Math.max(prev, liveTelemetry.chargingSeconds!));
       }
     } else if (liveTelemetry && (!liveTelemetry.transactionId || liveTelemetry.chargerStatus !== 'Charging')) {
       if (isChargingActive) {
@@ -191,14 +192,15 @@ export default function HomeScreen() {
     }
   }, [isChargingActive, pulseAnim, rotateAnim]);
 
-  // Sync real hardware energy & elapsed seconds from live telemetry
+  // Sync real hardware energy & elapsed seconds from live telemetry (monotonic forward)
   useEffect(() => {
     if (isChargingActive && liveTelemetry) {
       if (typeof liveTelemetry.energyDeliveredWh === 'number' && liveTelemetry.energyDeliveredWh > 0) {
-        setDeliveredKwh(Number((liveTelemetry.energyDeliveredWh / 1000).toFixed(3)));
+        const kwh = Number((liveTelemetry.energyDeliveredWh / 1000).toFixed(3));
+        setDeliveredKwh((prev) => Math.max(prev, kwh));
       }
       if (typeof liveTelemetry.chargingSeconds === 'number' && liveTelemetry.chargingSeconds > 0) {
-        setElapsedSeconds(liveTelemetry.chargingSeconds);
+        setElapsedSeconds((prev) => Math.max(prev, liveTelemetry.chargingSeconds!));
       }
     }
   }, [isChargingActive, liveTelemetry]);
@@ -846,7 +848,7 @@ export default function HomeScreen() {
             points={meterHistory}
             loading={isHistoryLoading}
             error={historyError}
-            ownerId={user?.mobile ?? null}
+            ownerId={'FLAT_A402_NITISH'}
           />
         </ScrollView>
       )}

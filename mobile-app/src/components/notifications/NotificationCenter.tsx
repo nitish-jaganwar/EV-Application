@@ -48,6 +48,7 @@ const NOTIFICATION_VISUALS: Record<NotificationType, { icon: string; color: stri
   charging_nearly_full: { icon: '↗', color: '#047857', background: '#D1FAE5' },
   charging_full: { icon: '✓', color: '#047857', background: '#D1FAE5' },
   unplug_reminder: { icon: '⌁', color: '#92400E', background: '#FEF3C7' },
+  station_available: { icon: '●', color: '#059669', background: '#D1FAE5' },
   test: { icon: 'T', color: '#6D28D9', background: '#EDE9FE' },
 };
 
