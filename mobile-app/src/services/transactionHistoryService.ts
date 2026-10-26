@@ -27,7 +27,7 @@ export async function fetchUserChargingHistory(
   signal?: AbortSignal,
 ): Promise<ChargingReceipt[]> {
   const query = `
-    query GetResidentTransactions($idToken: String!) {
+    query GetResidentTransactions($idToken: citext!) {
       Transactions(
         where: { Authorization: { idToken: { _eq: $idToken } } }
         order_by: { id: desc }
