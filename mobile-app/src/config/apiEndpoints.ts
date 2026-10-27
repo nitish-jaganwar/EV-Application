@@ -56,6 +56,18 @@ export const API_ENDPOINTS = {
       `${CITRINE_BASE_URL}/ocpp/1.6/evdriver/unlockConnector?identifier=${encodeURIComponent(chargerId)}&tenantId=${tenantId}`,
   },
 
+  // CitrineOS OCPP 2.0.1 / 2.1 EV Driver Endpoints
+  OCPP_201: {
+    REQUEST_START: (chargerId: string, tenantId = DEFAULT_TENANT_ID) =>
+      `${CITRINE_BASE_URL}/ocpp/2.1/evdriver/requestStartTransaction?identifier=${encodeURIComponent(chargerId)}&tenantId=${tenantId}`,
+
+    REQUEST_STOP: (chargerId: string, tenantId = DEFAULT_TENANT_ID) =>
+      `${CITRINE_BASE_URL}/ocpp/2.1/evdriver/requestStopTransaction?identifier=${encodeURIComponent(chargerId)}&tenantId=${tenantId}`,
+
+    UNLOCK_CONNECTOR: (chargerId: string, tenantId = DEFAULT_TENANT_ID) =>
+      `${CITRINE_BASE_URL}/ocpp/2.1/evdriver/unlockConnector?identifier=${encodeURIComponent(chargerId)}&tenantId=${tenantId}`,
+  },
+
   // Hasura GraphQL Endpoint (Live Citrine DB queries & subscriptions)
   GRAPHQL: HASURA_ENDPOINT,
 };

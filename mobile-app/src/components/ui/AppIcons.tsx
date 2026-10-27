@@ -140,3 +140,13 @@ export function ShieldCheckIcon({ size = 20, color = '#16A34A' }: IconProps) {
   );
 }
 
+export function FlashlightIcon({ size = 20, color = '#FFFFFF' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M18 6l-6-4-6 4v3l3 3v8h6v-8l3-3V6z" />
+      <Line x1="12" y1="12" x2="12" y2="12.01" />
+    </Svg>
+  );
+}
+
+

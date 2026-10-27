@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
-  RefreshControl,
+  Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {
@@ -21,11 +23,37 @@ interface Props {
   error?: string | null;
 }
 
+// Month selector: current month + 5 previous months
+function buildMonths(): { label: string; year: number; month: number }[] {
+  const result = [];
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    result.push({
+      label: d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }),
+      year: d.getFullYear(),
+      month: d.getMonth(),
+    });
+  }
+  return result;
+}
+
+const MONTHS = buildMonths();
+
+// Clean display name: strip internal OCPP ID from user-facing labels
+function friendlyBayName(bayName: string, chargerId: string): string {
+  if (chargerId === 'cp001' || bayName.toLowerCase().includes('bay 01')) return 'Bay 01 · Tower A';
+  return bayName;
+}
+
 export default function ChargingRecords({ ownerId = 'FLAT_A402_NITISH', refreshTrigger = 0 }: Props) {
   const [receipts, setReceipts] = useState<ChargingReceipt[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<ChargingReceipt | null>(null);
+  const [selectedMonthIdx, setSelectedMonthIdx] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterActiveOnly, setFilterActiveOnly] = useState(false);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -48,8 +76,31 @@ export default function ChargingRecords({ ownerId = 'FLAT_A402_NITISH', refreshT
     loadHistory();
   };
 
-  const totalMonthlyKwh = receipts.reduce((acc, item) => acc + item.energyKwh, 0);
-  const totalMonthlyAmount = receipts.reduce((acc, item) => acc + item.totalCost, 0);
+  const selectedMonth = MONTHS[selectedMonthIdx];
+
+  // Month-filtered base receipts
+  const monthReceipts = useMemo(() => {
+    return receipts.filter((r) => {
+      const d = new Date(r.startTime);
+      return d.getFullYear() === selectedMonth.year && d.getMonth() === selectedMonth.month;
+    });
+  }, [receipts, selectedMonth]);
+
+  // Search and quick-filter matching
+  const displayedReceipts = useMemo(() => {
+    return monthReceipts.filter((item) => {
+      if (filterActiveOnly && item.energyKwh <= 0.05) return false;
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      const bay = friendlyBayName(item.bayName, item.chargerId).toLowerCase();
+      const txn = (item.transactionId || '').toLowerCase();
+      const date = item.startTime.toLowerCase();
+      return bay.includes(q) || txn.includes(q) || date.includes(q);
+    });
+  }, [monthReceipts, searchQuery, filterActiveOnly]);
+
+  const totalMonthlyKwh = monthReceipts.reduce((acc, item) => acc + item.energyKwh, 0);
+  const totalMonthlyAmount = monthReceipts.reduce((acc, item) => acc + item.totalCost, 0);
 
   const formatDate = (isoString: string) => {
     try {
@@ -65,29 +116,72 @@ export default function ChargingRecords({ ownerId = 'FLAT_A402_NITISH', refreshT
     }
   };
 
+  // Export as formatted statement or CSV
+  const handleExportShare = async () => {
+    const csvHeader = 'Date,Bay,Energy_kWh,Rate_INR,Cost_INR,Status';
+    const csvRows = monthReceipts.map((r) =>
+      `"${formatDate(r.startTime)}","${friendlyBayName(r.bayName, r.chargerId)}",${r.energyKwh},${r.tariffRate},${r.totalCost.toFixed(2)},${r.status}`
+    );
+    const text = [
+      `tBits EV Charging Statement — ${selectedMonth.label}`,
+      `Resident: Tower A - 402 (Nitish) | Post-Paid Ledger`,
+      `Total Consumption: ${totalMonthlyKwh.toFixed(2)} kWh | Total Bill: ₹${totalMonthlyAmount.toFixed(2)}`,
+      ``,
+      csvHeader,
+      ...csvRows,
+      ``,
+      `Billed directly to flat monthly maintenance statement.`,
+    ].join('\n');
+
+    try {
+      await Share.share({ message: text, title: `EV Statement ${selectedMonth.label}` });
+    } catch (err) {
+      Alert.alert('Could not export statement', 'Please try again.');
+    }
+  };
+
   return (
     <View style={styles.root}>
-      {/* Title */}
+      {/* Title Row with Refresh Icon */}
       <View style={styles.titleRow}>
         <View>
-          <Text style={styles.title}>Society Ledger & Records</Text>
+          <Text style={styles.title}>Monthly Statement</Text>
           <Text style={styles.subtitle}>
-            Live OCPP transactions billed to flat maintenance
+            EV consumption billed to maintenance ledger
           </Text>
         </View>
-        <Pressable onPress={onRefresh} style={styles.refreshBtn} hitSlop={8}>
-          <Text style={styles.refreshBtnText}>🔄 Refresh</Text>
+        <Pressable
+          onPress={onRefresh}
+          style={styles.refreshBtn}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh records"
+        >
+          <Text style={styles.refreshBtnIcon}>{refreshing ? '…' : '↻'}</Text>
         </Pressable>
       </View>
 
-      {/* Monthly Statement Card */}
+      {/* Month Selector Horizontal Strip */}
+      <View style={styles.monthSelectorRow}>
+        {MONTHS.map((m, idx) => (
+          <Pressable
+            key={m.label}
+            style={[styles.monthChip, idx === selectedMonthIdx && styles.monthChipActive]}
+            onPress={() => setSelectedMonthIdx(idx)}
+          >
+            <Text style={[styles.monthChipText, idx === selectedMonthIdx && styles.monthChipTextActive]}>
+              {m.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* Monthly Summary Ledger Card */}
       <View style={styles.statementCard}>
         <View style={styles.statementHeader}>
           <View>
-            <Text style={styles.monthTag}>CURRENT BILLING CYCLE</Text>
-            <Text style={styles.monthTitle}>
-              {new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
-            </Text>
+            <Text style={styles.monthTag}>BILLING CYCLE</Text>
+            <Text style={styles.monthTitle}>{selectedMonth.label}</Text>
           </View>
           <View style={styles.ledgerBadge}>
             <Text style={styles.ledgerBadgeText}>Post-Paid Ledger</Text>
@@ -106,76 +200,121 @@ export default function ChargingRecords({ ownerId = 'FLAT_A402_NITISH', refreshT
           <View style={styles.statDivider} />
           <View style={styles.statCol}>
             <Text style={styles.statLabel}>Total Amount</Text>
-            <Text style={styles.statValueGreen}>₹{totalMonthlyAmount.toFixed(2)}</Text>
+            <Text style={styles.statValue}>₹{totalMonthlyAmount.toFixed(2)}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statCol}>
             <Text style={styles.statLabel}>Sessions</Text>
-            <Text style={styles.statValue}>{receipts.length}</Text>
+            <Text style={styles.statValue}>{monthReceipts.length}</Text>
           </View>
         </View>
 
-        <View style={styles.societyBillingNotice}>
-          <Text style={styles.noticeIcon}>ℹ️</Text>
-          <Text style={styles.noticeText}>
-            No in-app payment required. Automatically appended to your society maintenance ledger.
-          </Text>
-        </View>
+        {/* Export / Share Button */}
+        <Pressable style={styles.exportBtn} onPress={handleExportShare}>
+          <Text style={styles.exportBtnIcon}>↑</Text>
+          <Text style={styles.exportBtnText}>Export / Share CSV Statement</Text>
+        </Pressable>
       </View>
 
-      {/* Session Receipts List */}
+      {/* Search & Filter Bar */}
+      <View style={styles.searchFilterRow}>
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search bay or date..."
+            placeholderTextColor="#94A3B8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+              <Text style={styles.clearSearchText}>✕</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <Pressable
+          style={[styles.filterToggleBtn, filterActiveOnly && styles.filterToggleBtnActive]}
+          onPress={() => setFilterActiveOnly((v) => !v)}
+          accessibilityRole="button"
+          accessibilityLabel="Filter meaningful charges"
+        >
+          <Text style={[styles.filterToggleText, filterActiveOnly && styles.filterToggleTextActive]}>
+            {filterActiveOnly ? '>0 kWh ✓' : 'All'}
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Session Receipts List Header */}
       <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionHeader}>Charging Receipts History</Text>
-        <Text style={styles.sectionHint}>Tap for detailed receipt</Text>
+        <Text style={styles.sectionHeader}>
+          Charging Receipts ({displayedReceipts.length})
+        </Text>
+        <Text style={styles.sectionHint}>Tap for receipt detail</Text>
       </View>
 
       {loading ? (
         <View style={styles.loaderBox}>
           <ActivityIndicator size="small" color="#2563EB" />
-          <Text style={styles.loaderText}>Syncing CitrineOS ledger...</Text>
+          <Text style={styles.loaderText}>Loading transactions...</Text>
         </View>
-      ) : receipts.length === 0 ? (
+      ) : displayedReceipts.length === 0 ? (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyEmoji}>⚡</Text>
-          <Text style={styles.emptyTitle}>No Charging Sessions Yet</Text>
+          <Text style={styles.emptyTitle}>No matching sessions</Text>
           <Text style={styles.emptyDesc}>
-            Your completed charging sessions at Bay 01 will automatically appear here with full unit and cost breakdowns.
+            {searchQuery
+              ? `No sessions found matching "${searchQuery}".`
+              : `No charging activity recorded in ${selectedMonth.label}.`}
           </Text>
         </View>
       ) : (
-        receipts.map((item) => (
+        displayedReceipts.map((item) => (
           <Pressable
             key={item.id}
             style={({ pressed }) => [styles.receiptCard, pressed && styles.receiptCardPressed]}
             onPress={() => setSelectedReceipt(item)}
           >
-            {/* Top row: Bay & Amount */}
+            {/* Top row: Bay Name + Date | Cost */}
             <View style={styles.receiptTopRow}>
               <View style={styles.receiptBayBox}>
-                <Text style={styles.receiptBayTitle}>{item.bayName} · {item.chargerId}</Text>
+                <Text style={styles.receiptBayTitle}>
+                  {friendlyBayName(item.bayName, item.chargerId)}
+                </Text>
                 <Text style={styles.receiptDate}>{formatDate(item.startTime)}</Text>
               </View>
               <View style={styles.receiptCostBox}>
-                <Text style={styles.receiptCostAmount}>₹{item.totalCost.toFixed(2)}</Text>
+                <Text style={[styles.receiptCostAmount, { fontVariant: ['tabular-nums'] }]}>
+                  ₹{item.totalCost.toFixed(2)}
+                </Text>
                 <View style={styles.completedPill}>
                   <Text style={styles.completedPillText}>✓ {item.status.toUpperCase()}</Text>
                 </View>
               </View>
             </View>
 
-            {/* Metrics pills */}
+            {/* Clean 3-Column Metrics (Energy | Duration | Rate) */}
             <View style={styles.metricsRow}>
-              <View style={styles.metricPill}>
-                <Text style={styles.metricPillLabel}>Energy: </Text>
-                <Text style={styles.metricPillVal}>{item.energyKwh} kWh</Text>
+              <View style={styles.metricItem}>
+                <Text style={styles.metricItemLabel}>ENERGY</Text>
+                <Text style={[styles.metricItemVal, { fontVariant: ['tabular-nums'] }]}>
+                  {item.energyKwh} kWh
+                </Text>
               </View>
-              <View style={styles.metricPill}>
-                <Text style={styles.metricPillLabel}>Duration: </Text>
-                <Text style={styles.metricPillVal}>{item.durationMins}m</Text>
+              <View style={styles.metricItemDivider} />
+              <View style={styles.metricItem}>
+                <Text style={styles.metricItemLabel}>DURATION</Text>
+                <Text style={[styles.metricItemVal, { fontVariant: ['tabular-nums'] }]}>
+                  {item.durationMins} min
+                </Text>
               </View>
-              <View style={styles.metricPill}>
-                <Text style={styles.metricPillLabel}>Rate: </Text>
-                <Text style={styles.metricPillVal}>₹{item.tariffRate}/kWh</Text>
+              <View style={styles.metricItemDivider} />
+              <View style={styles.metricItem}>
+                <Text style={styles.metricItemLabel}>RATE</Text>
+                <Text style={[styles.metricItemVal, { fontVariant: ['tabular-nums'] }]}>
+                  ₹{item.tariffRate}/kWh
+                </Text>
               </View>
               <Text style={styles.chevron}>›</Text>
             </View>
@@ -203,7 +342,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   title: {
     fontSize: 22,
@@ -213,19 +352,49 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 13,
-    color: '#64748B',
+    color: '#475569',
     marginTop: 2,
   },
   refreshBtn: {
     backgroundColor: '#F1F5F9',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  refreshBtnText: {
-    fontSize: 12,
+  refreshBtnIcon: {
+    fontSize: 17,
     color: '#334155',
+    fontWeight: '700',
+  },
+  monthSelectorRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  monthChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  monthChipActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
+  },
+  monthChipText: {
+    fontSize: 11,
     fontWeight: '600',
+    color: '#475569',
+  },
+  monthChipTextActive: {
+    color: '#FFFFFF',
   },
   statementCard: {
     backgroundColor: '#FFFFFF',
@@ -238,7 +407,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 8,
     elevation: 2,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   statementHeader: {
     flexDirection: 'row',
@@ -301,33 +470,89 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: '#0F172A',
-  },
-  statValueGreen: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#059669',
+    fontVariant: ['tabular-nums'],
   },
   statDivider: {
     width: 1,
     height: 28,
     backgroundColor: '#E2E8F0',
   },
-  societyBillingNotice: {
+  exportBtn: {
     flexDirection: 'row',
-    backgroundColor: '#F0FDF4',
-    padding: 10,
-    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  exportBtnIcon: {
+    fontSize: 14,
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+  exportBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  // Search and Filter controls
+  searchFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+    alignItems: 'center',
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    height: 42,
     gap: 8,
   },
-  noticeIcon: {
-    fontSize: 14,
+  searchIcon: {
+    fontSize: 13,
+    color: '#64748B',
   },
-  noticeText: {
+  searchInput: {
     flex: 1,
-    fontSize: 11,
-    color: '#166534',
-    lineHeight: 16,
+    fontSize: 13,
+    color: '#0F172A',
+    padding: 0,
+  },
+  clearSearchText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    paddingHorizontal: 4,
+  },
+  filterToggleBtn: {
+    paddingHorizontal: 12,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  filterToggleBtnActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#2563EB',
+  },
+  filterToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  filterToggleTextActive: {
+    color: '#2563EB',
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -336,8 +561,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionHeader: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
     color: '#0F172A',
   },
   sectionHint: {
@@ -431,29 +656,34 @@ const styles = StyleSheet.create({
   metricsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
     borderTopWidth: 1,
-    borderColor: '#F8FAFC',
-    paddingTop: 8,
+    borderColor: '#F1F5F9',
+    paddingTop: 10,
   },
-  metricPill: {
-    flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+  metricItem: {
+    flex: 1,
+    alignItems: 'center',
   },
-  metricPillLabel: {
-    fontSize: 11,
-    color: '#64748B',
+  metricItemLabel: {
+    fontSize: 9,
+    color: '#94A3B8',
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
-  metricPillVal: {
-    fontSize: 11,
+  metricItemVal: {
+    fontSize: 13,
     fontWeight: '700',
     color: '#0F172A',
   },
+  metricItemDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: '#E2E8F0',
+    marginHorizontal: 4,
+  },
   chevron: {
-    marginLeft: 'auto',
+    marginLeft: 8,
     fontSize: 18,
     fontWeight: '700',
     color: '#94A3B8',

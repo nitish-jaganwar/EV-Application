@@ -149,15 +149,47 @@ export async function startChargingTransaction(
   idTag = 'FLAT_A402_NITISH',
   connectorId = 1,
 ): Promise<boolean> {
-  const url = API_ENDPOINTS.OCPP_16.REMOTE_START(chargerId);
+  // 1. First priority: OCPP 2.1 / 2.0.1 (Used by EVerest Yeti simulator on CitrineOS)
+  const url21 = API_ENDPOINTS.OCPP_201.REQUEST_START(chargerId);
+  const remoteStartId = Math.floor(Math.random() * 100000) + 1;
+  const body21 = {
+    remoteStartId,
+    evseId: connectorId || 1,
+    idToken: {
+      idToken: idTag,
+      type: 'Central',
+    },
+  };
+
   addAppLog(
     'API',
-    `POST RemoteStartTransaction (${chargerId})`,
-    `Connector: ${connectorId}, idTag: ${idTag}`,
+    `POST RequestStartTransaction (${chargerId})`,
+    `Protocol: OCPP 2.1, evseId: ${connectorId}, idTag: ${idTag}`,
     'PENDING'
   );
+
   try {
-    const res = await fetch(url, {
+    const res21 = await fetch(url21, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body21),
+    });
+    if (res21.ok) {
+      const json21 = await res21.json();
+      const isSuccess21 = Array.isArray(json21) && json21[0]?.success === true;
+      if (isSuccess21) {
+        addAppLog('OCPP', `OCPP 2.1 RequestStart Accepted (${chargerId})`, JSON.stringify(json21), 'SUCCESS');
+        return true;
+      }
+    }
+  } catch (err: any) {
+    console.warn('OCPP 2.1 start attempt failed, falling back to 1.6:', err?.message);
+  }
+
+  // 2. Fallback: OCPP 1.6 RemoteStartTransaction
+  const url16 = API_ENDPOINTS.OCPP_16.REMOTE_START(chargerId);
+  try {
+    const res = await fetch(url16, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -165,34 +197,22 @@ export async function startChargingTransaction(
         connectorId,
       }),
     });
-    if (!res.ok) {
+    if (res.ok) {
+      const json = await res.json();
+      const isSuccess = Array.isArray(json) && json[0]?.success === true;
       addAppLog(
-        'ERROR',
-        `RemoteStart HTTP ${res.status}`,
-        `Citrine server returned status ${res.status}`,
-        'REJECTED'
+        isSuccess ? 'OCPP' : 'ERROR',
+        isSuccess ? `OCPP 1.6 RemoteStart Accepted (${chargerId})` : `RemoteStart Rejected (${chargerId})`,
+        JSON.stringify(json),
+        isSuccess ? 'SUCCESS' : 'REJECTED'
       );
-      return false;
+      return isSuccess;
     }
-    const json = await res.json();
-    const isSuccess = Array.isArray(json) && json[0]?.success === true;
-    addAppLog(
-      isSuccess ? 'OCPP' : 'ERROR',
-      isSuccess ? `RemoteStart Accepted (${chargerId})` : `RemoteStart Rejected (${chargerId})`,
-      JSON.stringify(json),
-      isSuccess ? 'SUCCESS' : 'REJECTED'
-    );
-    return isSuccess;
   } catch (err: any) {
-    addAppLog(
-      'ERROR',
-      `RemoteStart Network Error`,
-      err?.message || 'Failed to connect to Citrine',
-      'REJECTED'
-    );
-    console.warn('Start transaction failed:', err);
-    return false;
+    addAppLog('ERROR', `RemoteStart Network Error (${chargerId})`, err?.message || 'Failed', 'REJECTED');
   }
+
+  return false;
 }
 
 export async function stopChargingTransaction(
@@ -201,20 +221,27 @@ export async function stopChargingTransaction(
   connectorId?: number,
   evseId?: number,
 ): Promise<void> {
-  // Convert transactionId to integer for OCPP 1.6
+  // Try OCPP 2.1 RequestStop first
+  try {
+    const url21 = API_ENDPOINTS.OCPP_201.REQUEST_STOP(chargerId);
+    await fetch(url21, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transactionId: String(transactionId) }),
+    });
+    addAppLog('OCPP', `OCPP 2.1 RequestStop Dispatched (${chargerId})`, `TxID: ${transactionId}`, 'SUCCESS');
+  } catch (err) {
+    // Fall back to 1.6
+  }
+
+  // Fallback to OCPP 1.6
   const txIdNum = typeof transactionId === 'number'
     ? transactionId
     : parseInt(String(transactionId), 10);
 
-  const url = API_ENDPOINTS.OCPP_16.REMOTE_STOP(chargerId);
-  addAppLog(
-    'API',
-    `POST RemoteStopTransaction (${chargerId})`,
-    `TxID: ${txIdNum}`,
-    'PENDING'
-  );
+  const url16 = API_ENDPOINTS.OCPP_16.REMOTE_STOP(chargerId);
   try {
-    const res = await fetch(url, {
+    const res = await fetch(url16, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

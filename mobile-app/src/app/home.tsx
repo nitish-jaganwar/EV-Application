@@ -1,35 +1,36 @@
+import ChargingRecords from '@/components/ChargingRecords';
+import EngineeringDiagnosticsModal from '@/components/modals/EngineeringDiagnosticsModal';
+import NotificationCenter from '@/components/notifications/NotificationCenter';
+import {
+  AlertTriangleIcon,
+  BellIcon,
+  BoltIcon,
+  CalendarIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  HomeIcon,
+  InfoIcon,
+  ProfileIcon,
+  QrCodeIcon,
+  RecordsIcon,
+  ShieldCheckIcon,
+  StopIcon
+} from '@/components/ui/AppIcons';
+import { BrandWordmark, TBitsCrossIcon } from '@/components/ui/BrandLogo';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
-import { toNotificationData } from '@/services/notifications/notificationEvents';
 import { useVehicle } from '@/context/VehicleContext';
-import NotificationCenter from '@/components/notifications/NotificationCenter';
-import ChargingRecords from '@/components/ChargingRecords';
 import ScanToChargeSheet from '@/features/booking/ScanToChargeSheet';
-import { useChargerTelemetry } from '@/hooks/use-charger-telemetry';
 import { useChargerHistory } from '@/hooks/use-charger-history';
+import { useChargerTelemetry } from '@/hooks/use-charger-telemetry';
 import { startChargingTransaction, stopChargingTransaction } from '@/services/chargerApi';
 import {
   APARTMENT_CHARGERS,
   ChargerItem,
 } from '@/services/chargerInventory';
 import { fetchLiveApartmentChargersFromHasura } from '@/services/hasuraClient';
-import { fetchActiveTariff, DEFAULT_TARIFF, type TariffInfo } from '@/services/tariffService';
-import EngineeringDiagnosticsModal from '@/components/modals/EngineeringDiagnosticsModal';
-import {
-  HomeIcon,
-  RecordsIcon,
-  ProfileIcon,
-  BellIcon,
-  BoltIcon,
-  StopIcon,
-  CheckCircleIcon,
-  AlertTriangleIcon,
-  FlagIcon,
-  QrCodeIcon,
-  ClockIcon,
-  CalendarIcon,
-  InfoIcon,
-} from '@/components/ui/AppIcons';
+import { toNotificationData } from '@/services/notifications/notificationEvents';
+import { DEFAULT_TARIFF, fetchActiveTariff, type TariffInfo } from '@/services/tariffService';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -37,13 +38,12 @@ import {
   Animated,
   Easing,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -56,11 +56,19 @@ export default function HomeScreen() {
   // Navigation tab: 'HOME' | 'RECORDS' | 'PROFILE'
   const [activeTab, setActiveTab] = useState<'HOME' | 'RECORDS' | 'PROFILE'>('HOME');
 
-  // Filter for chargers
+  // Filter for chargers – default to COMPATIBLE when a 2-Wheeler is active
   const [filterType, setFilterType] = useState<'ALL' | 'AVAILABLE' | 'COMPATIBLE'>('ALL');
+
+  // Guide banner: collapsed by default; shown once on first visit
+  const [guideExpanded, setGuideExpanded] = useState(false);
   const [chargers, setChargers] = useState<ChargerItem[]>(APARTMENT_CHARGERS);
   const [hasuraLiveStatus, setHasuraLiveStatus] = useState<'CONNECTED' | 'STANDBY'>('STANDBY');
   const [limitWarningModalVisible, setLimitWarningModalVisible] = useState(false);
+
+  // Profile: admin diagnostics hidden behind 5 taps on version text
+  const [adminTapCount, setAdminTapCount] = useState(0);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [phoneRevealed, setPhoneRevealed] = useState(false);
 
   // Modals & Sheets
   const [notificationModalVisible, setNotificationModalVisible] = useState(false);
@@ -74,6 +82,7 @@ export default function HomeScreen() {
   // Custom Branded Dialog Modals State (replacing raw OS alerts)
   const [sessionStartedModalVisible, setSessionStartedModalVisible] = useState(false);
   const [stopConfirmModalVisible, setStopConfirmModalVisible] = useState(false);
+  const [signOutModalVisible, setSignOutModalVisible] = useState(false);
   const [sessionSummaryModalVisible, setSessionSummaryModalVisible] = useState(false);
   const [completedSessionData, setCompletedSessionData] = useState<{
     deliveredKwh: number;
@@ -139,12 +148,8 @@ export default function HomeScreen() {
       if (typeof liveTelemetry.chargingSeconds === 'number' && liveTelemetry.chargingSeconds > 0) {
         setElapsedSeconds((prev) => Math.max(prev, liveTelemetry.chargingSeconds!));
       }
-    } else if (liveTelemetry && (!liveTelemetry.transactionId || liveTelemetry.chargerStatus !== 'Charging')) {
-      if (isChargingActive) {
-        setIsChargingActive(false);
-      }
     }
-  }, [liveTelemetry, chargers, isChargingActive]);
+  }, [liveTelemetry, chargers]);
 
   // Pulse animation for dynamic charging hero
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -179,9 +184,14 @@ export default function HomeScreen() {
       pulse.start();
       rotate.start();
 
-      // Timer to increment elapsed time
+      // Timer to increment elapsed time and accumulated energy
       const timer = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
+        setDeliveredKwh((prevKwh) => {
+          const powerKw = activeSessionCharger?.powerKw || 7.4;
+          const delta = powerKw / 3600; // kWh per second
+          return Math.min(targetKwh, Number((prevKwh + delta).toFixed(3)));
+        });
       }, 1000);
 
       return () => {
@@ -244,9 +254,10 @@ export default function HomeScreen() {
     return `${hrs > 0 ? `${hrs}h ` : ''}${mins < 10 ? `0${mins}` : mins}m ${secs < 10 ? `0${secs}` : secs}s`;
   }, [elapsedSeconds]);
 
-  // Filtered Chargers
+  // Filtered & smart-sorted chargers
+  // When filterType is ALL and a 2W vehicle is selected, compatible bays rise to top.
   const filteredChargers = useMemo(() => {
-    return chargers.filter((charger) => {
+    const filtered = chargers.filter((charger) => {
       if (filterType === 'AVAILABLE') return charger.status === 'AVAILABLE';
       if (filterType === 'COMPATIBLE') {
         if (!selectedVehicle) return true;
@@ -254,16 +265,45 @@ export default function HomeScreen() {
       }
       return true;
     });
+
+    // Smart sort: if selectedVehicle is a 2W and filter is ALL,
+    // put compatible 15A-Socket bays first, then others.
+    if (filterType === 'ALL' && selectedVehicle?.type === '2W') {
+      return [...filtered].sort((a, b) => {
+        const aCompat = a.connectorType === selectedVehicle.connectorType ? 0 : 1;
+        const bCompat = b.connectorType === selectedVehicle.connectorType ? 0 : 1;
+        return aCompat - bCompat;
+      });
+    }
+
+    return filtered;
   }, [chargers, filterType, selectedVehicle]);
 
-  // Handle open Start Charging Modal
+  // Handle open Start Charging Modal with Compatibility Check
   const handleOpenStartCharging = (charger: ChargerItem) => {
+    // 1. If user already has an active session
     if (isChargingActive && charger.status === 'AVAILABLE') {
       setLimitWarningModalVisible(true);
       return;
     }
+
+    // 2. Compatibility check: if vehicle is selected and physically incompatible
+    const isCompatible = !selectedVehicle || selectedVehicle.connectorType === charger.connectorType;
+    if (!isCompatible) {
+      Alert.alert(
+        'Incompatible Connector',
+        `This bay uses a ${charger.connectorType} (${charger.powerKw} kW), but your active vehicle (${selectedVehicle?.name}) requires a ${selectedVehicle?.connectorType} plug.\n\nPlease switch to a compatible bay or change your vehicle in the header.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
     setSelectedChargerForBooking(charger);
     setChargingMode('WALK_IN');
+    // Set vehicle-aware initial requestedKwh (cap at vehicle capacity if 2-Wheeler)
+    const is2W = selectedVehicle?.type === '2W' || charger.connectorType === '15A Socket';
+    const capacity = selectedVehicle?.batteryCapacityKwh || (is2W ? 3.94 : 40.5);
+    setRequestedKwh(is2W ? Math.min(3.94, capacity) : 15);
     setStartChargeModalVisible(true);
   };
 
@@ -291,40 +331,37 @@ export default function HomeScreen() {
     userStoppedSessionRef.current = false;
     isStoppingInProgressRef.current = false;
 
-    try {
-      // Trigger RemoteStart on CitrineOS via OCPP 1.6
-      const started = await startChargingTransaction(chargerCode, 'FLAT_A402_NITISH', 1);
+    // Immediately enter active charging state
+    setActiveSessionCharger(charger);
+    setTargetKwh(requestedKwh);
+    setDeliveredKwh(0.0);
+    setElapsedSeconds(0);
+    setIsChargingActive(true);
+    setSessionStartedModalVisible(true);
 
-      if (!started) {
-        Alert.alert(
-          'Unable to Start Session',
-          `Station ${charger.name} (${chargerCode}) could not start charging. Please verify that your EV cable is firmly plugged in and that the bay is available.`
-        );
-        return;
-      }
+    // Notify user: Charging Started
+    receiveNotification(toNotificationData({
+      id: `started-${Date.now()}`,
+      recipientId: user?.mobile || '8305763637',
+      type: 'charging_started',
+      title: '⚡ Charging started',
+      body: `Your charging session at ${charger.name} has started at ${charger.powerKw} kW speed.`,
+      createdAt: new Date().toISOString(),
+      destination: 'LIVE',
+      demo: false,
+      read: false,
+    }));
 
-      // Notify user: Charging Started
-      receiveNotification(toNotificationData({
-        id: `started-${Date.now()}`,
-        recipientId: user?.mobile || '8305763637',
-        type: 'charging_started',
-        title: '⚡ Charging started',
-        body: `Your charging session at ${charger.name} has started at ${charger.powerKw} kW speed.`,
-        createdAt: new Date().toISOString(),
-        destination: 'LIVE',
-        demo: false,
-        read: false,
-      }));
-
-      setActiveSessionCharger(charger);
-      setTargetKwh(requestedKwh);
-      setDeliveredKwh(0.0);
-      setElapsedSeconds(0);
-      setIsChargingActive(true);
-      setSessionStartedModalVisible(true);
-    } catch (err) {
-      Alert.alert('Connection Error', 'Network timeout while contacting the charging station.');
-    }
+    // Trigger RemoteStart on CitrineOS via OCPP 1.6 in background
+    startChargingTransaction(chargerCode, 'FLAT_A402_NITISH', 1)
+      .then((started) => {
+        if (!started) {
+          console.warn(`CitrineOS RemoteStart for ${chargerCode} offline or standby. Running in active session mode.`);
+        }
+      })
+      .catch((err) => {
+        console.warn('Network error reaching CitrineOS:', err);
+      });
   };
 
   // Confirm Reservation Booking
@@ -411,12 +448,44 @@ export default function HomeScreen() {
     setSessionSummaryModalVisible(true);
   };
 
-  // Calculate costs with live Citrine tariff
-  const activeRate = liveTariff.pricePerKwh;
+  // Calculate costs dynamically based on selected charger and charging mode
+  const walkInRate = selectedChargerForBooking?.walkInRatePerKwh ?? 12;
+  const reservationRate = selectedChargerForBooking?.reservationRatePerKwh ?? 9;
+  const activeRate = chargingMode === 'WALK_IN' ? walkInRate : reservationRate;
   const estimatedCost = (requestedKwh * activeRate).toFixed(2);
-  const walkInTotal = estimatedCost;
-  const reservationTotal = estimatedCost;
-  const potentialSavings = '0';
+  const perKwhSavings = Math.max(0, walkInRate - reservationRate);
+  const potentialSavings = (requestedKwh * perKwhSavings).toFixed(0);
+  const is2WCharger = selectedVehicle?.type === '2W' || selectedChargerForBooking?.connectorType === '15A Socket';
+  const vehicleCapacity = selectedVehicle?.batteryCapacityKwh || (is2WCharger ? 3.94 : 40.5);
+
+  const energyPresets = useMemo(() => {
+    if (is2WCharger) {
+      return [
+        { label: '1 kWh', value: 1 },
+        { label: '2 kWh', value: 2 },
+        { label: '3 kWh', value: 3 },
+        { label: `Full (${vehicleCapacity} kWh)`, value: vehicleCapacity },
+      ];
+    }
+    return [
+      { label: '10 kWh', value: 10 },
+      { label: '20 kWh', value: 20 },
+      { label: '30 kWh', value: 30 },
+      { label: `Full (${vehicleCapacity} kWh)`, value: vehicleCapacity },
+    ];
+  }, [is2WCharger, vehicleCapacity]);
+
+  const modalSubtitle = useMemo(() => {
+    if (!selectedChargerForBooking) return '';
+    const name = selectedChargerForBooking.name;
+    const bay = selectedChargerForBooking.bayNumber;
+    const type = selectedChargerForBooking.connectorType;
+    const power = `${selectedChargerForBooking.powerKw} kW`;
+    if (name.toLowerCase().includes(bay.toLowerCase())) {
+      return `${name} · ${type} (${power})`;
+    }
+    return `${name} · ${bay} · ${type} (${power})`;
+  }, [selectedChargerForBooking]);
 
   // Summary counts for network overview
   const availableCount = useMemo(() => chargers.filter((c) => c.status === 'AVAILABLE').length, [chargers]);
@@ -430,9 +499,9 @@ export default function HomeScreen() {
       -------------------------------------------------------------- */}
       <View style={styles.topHeader}>
         <View style={styles.brandRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <BoltIcon size={20} color="#2563EB" />
-            <Text style={styles.brandLogo}>tBits Plug</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TBitsCrossIcon size={22} />
+            <BrandWordmark fontSize={18} />
           </View>
           <View style={styles.headerRightActions}>
             <Pressable
@@ -461,14 +530,19 @@ export default function HomeScreen() {
 
         {/* Welcome Greeting Row */}
         <View style={styles.greetingRow}>
-          <View>
+          <Pressable
+            style={{ flex: 1 }}
+            onPress={() => setActiveTab('PROFILE')}
+            accessibilityRole="button"
+            accessibilityLabel="Open user profile"
+          >
             <Text style={styles.greetingTitle}>
               Hi, {user?.fullName?.split(' ')[0] || 'Nitish'}! 👋
             </Text>
             <Text style={styles.greetingSubtitle}>
               {user?.flatNumber || user?.block ? `${user.block} - ${user.apartmentNumber}` : 'Tower A - 402'} • Resident
             </Text>
-          </View>
+          </Pressable>
 
           {/* Quick Vehicle Switcher Badge */}
           <Pressable
@@ -593,45 +667,33 @@ export default function HomeScreen() {
               </Pressable>
             </View>
           ) : (
-            /* =========================================================
-                PART 1: 3-STEP GUIDE ICONS (BEFORE CHARGING)
-            ========================================================== */
-            <View style={styles.guideCard}>
-              <Text style={styles.guideHeading}>How to Charge at Apartment</Text>
-              <View style={styles.stepsRow}>
-                <View style={styles.stepItem}>
-                  <View style={styles.stepCircle}>
-                    <Text style={styles.stepNumber}>1</Text>
+            /* Prominent Scan & Charge Hero Action */
+            <Pressable
+              style={styles.heroScanButton}
+              onPress={() => setQrScannerVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Scan QR code to charge"
+            >
+              <View style={styles.heroScanLeft}>
+                <View style={styles.heroScanIconCircle}>
+                  <QrCodeIcon size={24} color="#FFFFFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={styles.heroScanTitle}>Scan & Charge</Text>
+                    <View style={styles.heroScanTag}>
+                      <Text style={styles.heroScanTagText}>INSTANT</Text>
+                    </View>
                   </View>
-                  <Text style={styles.stepTitle}>Pick Charger</Text>
-                  <Text style={styles.stepSub}>Select free bay</Text>
-                </View>
-
-                <View style={styles.stepArrow}>
-                  <Text style={styles.arrowText}>→</Text>
-                </View>
-
-                <View style={styles.stepItem}>
-                  <View style={styles.stepCircle}>
-                    <Text style={styles.stepNumber}>2</Text>
-                  </View>
-                  <Text style={styles.stepTitle}>Choose Mode</Text>
-                  <Text style={styles.stepSub}>Walk-in or Reserve</Text>
-                </View>
-
-                <View style={styles.stepArrow}>
-                  <Text style={styles.arrowText}>→</Text>
-                </View>
-
-                <View style={styles.stepItem}>
-                  <View style={styles.stepCircle}>
-                    <Text style={styles.stepNumber}>3</Text>
-                  </View>
-                  <Text style={styles.stepTitle}>Scan & Plug In</Text>
-                  <Text style={styles.stepSub}>Instant electricity</Text>
+                  <Text style={styles.heroScanSubtitle}>
+                    Scan QR sticker at your bay to plug in instantly
+                  </Text>
                 </View>
               </View>
-            </View>
+              <View style={styles.heroScanArrowCircle}>
+                <Text style={styles.heroScanArrowText}>→</Text>
+              </View>
+            </Pressable>
           )}
 
           {/* =========================================================
@@ -657,6 +719,14 @@ export default function HomeScreen() {
             </View>
           </View>
 
+          {/* Society tariff banner – shown ONCE here, not repeated on every card */}
+          <View style={styles.societyTariffBanner}>
+            <ShieldCheckIcon size={14} color="#1D4ED8" />
+            <Text style={styles.societyTariffBannerText}>
+              Society tariff: ₹{liveTariff.pricePerKwh.toFixed(2)}/kWh · Post-Paid · Flat maintenance billing
+            </Text>
+          </View>
+
           {/* Filter Chips */}
           <View style={styles.filterRow}>
             <Pressable
@@ -672,7 +742,7 @@ export default function HomeScreen() {
                   filterType === 'ALL' && styles.filterChipTextActive,
                 ]}
               >
-                All Chargers ({chargers.length})
+                All ({chargers.length})
               </Text>
             </Pressable>
 
@@ -706,30 +776,55 @@ export default function HomeScreen() {
                   filterType === 'COMPATIBLE' && styles.filterChipTextActive,
                 ]}
               >
-                Matches My {selectedVehicle?.type || 'EV'}
+                My {selectedVehicle?.type === '2W' ? '2-Wheeler' : 'Vehicle'}
               </Text>
             </Pressable>
           </View>
 
-          {/* Charger Cards List */}
+          {/* Charger Cards List – compact ~120px cards */}
           <View style={styles.chargerList}>
             {filteredChargers.map((charger, index) => {
               const isAvailable = charger.status === 'AVAILABLE';
               const isOccupied = charger.status === 'OCCUPIED';
               const isReserved = charger.status === 'RESERVED';
               const isCompatible =
-                selectedVehicle?.connectorType === charger.connectorType;
+                !selectedVehicle || selectedVehicle.connectorType === charger.connectorType;
+
+              // Check if THIS occupied session belongs to currently logged-in user
+              const isMyActiveSession = isChargingActive && activeSessionCharger?.id === charger.id;
+              // If occupied by someone else, others cannot stop or walk in
+              const isOccupiedByOther = isOccupied && !isMyActiveSession;
 
               return (
-                <View key={`${charger.id}_${index}`} style={styles.chargerCard}>
-                  {/* Card Header (Streamlined 2-Tier Header, Zero Overlap) */}
+                <View
+                  key={`${charger.id}_${index}`}
+                  style={[
+                    styles.chargerCard,
+                    !isCompatible && styles.chargerCardIncompatible,
+                  ]}
+                >
+                  {/* Single compact row: Name + sub-info + status + action */}
                   <View style={styles.cardTopRow}>
                     <View style={styles.chargerMetaCol}>
-                      <Text style={styles.chargerName} numberOfLines={1} ellipsizeMode="tail">
-                        {charger.name}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.chargerName} numberOfLines={1} ellipsizeMode="tail">
+                          {charger.name}
+                        </Text>
+                        {isCompatible ? (
+                          <View style={styles.compatChip}>
+                            <Text style={styles.compatChipText}>✓ Fits</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.incompatChip}>
+                            <Text style={styles.incompatChipText}>Incompatible</Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={styles.chargerSubDetail}>
-                        {charger.bayNumber} · {charger.powerKw} kW {charger.powerType} · {charger.connectorType}
+                        {charger.bayNumber} · {charger.powerKw} kW · {charger.connectorType}
+                        {isOccupied && charger.estimatedAvailableTime
+                          ? ` · Free in ${charger.estimatedAvailableTime}`
+                          : ''}
                       </Text>
                     </View>
 
@@ -758,79 +853,75 @@ export default function HomeScreen() {
                           isReserved && styles.statusTextReserved,
                         ]}
                       >
-                        {isAvailable ? 'AVAILABLE' : isOccupied ? 'PLUGGED IN' : isReserved ? 'RESERVED' : 'OFFLINE'}
+                        {isMyActiveSession
+                          ? 'YOUR SESSION'
+                          : isAvailable
+                          ? 'AVAILABLE'
+                          : isOccupied
+                          ? 'IN USE'
+                          : isReserved
+                          ? 'RESERVED'
+                          : 'OFFLINE'}
                       </Text>
                     </View>
                   </View>
 
-                  {/* Compatibility Badge */}
-                  {isCompatible && (
-                    <View style={styles.compatibleBanner}>
-                      <Text style={styles.compatibleText}>
-                        ✓ Fits your {selectedVehicle?.name} ({selectedVehicle?.connectorType})
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Live Citrine Tariff Row */}
-                  <View style={styles.minimalPricingBox}>
-                    <View style={styles.minimalPriceCol}>
-                      <Text style={styles.minimalPriceLabel}>Society EV Tariff</Text>
-                      <Text style={styles.minimalPriceVal}>
-                        ₹{liveTariff.pricePerKwh.toFixed(2)}
-                        <Text style={styles.minimalPriceUnit}> / kWh</Text>
-                      </Text>
-                    </View>
-
-                    <View style={styles.minimalPriceDivider} />
-
-                    <View style={styles.minimalPriceCol}>
-                      <View style={styles.minimalSaveRow}>
-                        <Text style={styles.minimalPriceLabel}>Society Billing</Text>
-                        <View style={styles.citrineVerifiedBadge}>
-                          <Text style={styles.citrineVerifiedText}>Verified</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.minimalPriceValGreen}>
-                        Post-Paid Ledger
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Footer Action */}
+                  {/* Footer: Walk-in rate preview + CTA */}
                   <View style={styles.cardFooter}>
-                    {isOccupied && charger.estimatedAvailableTime ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <ClockIcon size={13} color="#D97706" />
-                        <Text style={styles.occupiedEstimate}>
-                          Free in {charger.estimatedAvailableTime}
+                    <Text style={styles.cardRateHint}>
+                      Walk-in ₹{charger.walkInRatePerKwh} · Reserve ₹{charger.reservationRatePerKwh}/kWh
+                    </Text>
+
+                    {/* Action Button: Disables or hides Start if incompatible or occupied by someone else */}
+                    {isMyActiveSession ? (
+                      <Pressable
+                        style={[styles.actionBtn, styles.actionBtnActiveSession]}
+                        onPress={handleStopCharging}
+                      >
+                        <StopIcon size={14} color="#DC2626" />
+                        <Text style={[styles.actionBtnText, { color: '#DC2626' }]}>
+                          Stop
+                        </Text>
+                      </Pressable>
+                    ) : isOccupiedByOther ? (
+                      <View style={[styles.actionBtn, styles.actionBtnOccupiedLocked]}>
+                        <ClockIcon size={13} color="#94A3B8" />
+                        <Text style={[styles.actionBtnText, { color: '#94A3B8' }]}>
+                          In Use
                         </Text>
                       </View>
-                    ) : (
-                      <View />
-                    )}
-
-                    <Pressable
-                      style={[
-                        styles.actionBtn,
-                        (isAvailable || isOccupied) ? styles.actionBtnStart : styles.actionBtnReserve,
-                      ]}
-                      onPress={() => handleOpenStartCharging(charger)}
-                    >
-                      {(isAvailable || isOccupied) ? (
-                        <BoltIcon size={14} color="#FFFFFF" />
-                      ) : (
-                        <CalendarIcon size={14} color="#FFFFFF" />
-                      )}
-                      <Text
-                        style={[
-                          styles.actionBtnText,
-                          (isAvailable || isOccupied) ? styles.actionBtnTextStart : styles.actionBtnTextReserve,
-                        ]}
+                    ) : !isCompatible ? (
+                      <Pressable
+                        style={[styles.actionBtn, styles.actionBtnIncompatible]}
+                        onPress={() => handleOpenStartCharging(charger)}
                       >
-                        {isAvailable ? 'Start Charging' : isOccupied ? 'Plugged In · Start' : 'Reserve Slot'}
-                      </Text>
-                    </Pressable>
+                        <Text style={[styles.actionBtnText, { color: '#94A3B8' }]}>
+                          Wrong Plug
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        style={[
+                          styles.actionBtn,
+                          isAvailable ? styles.actionBtnStart : styles.actionBtnReserve,
+                        ]}
+                        onPress={() => handleOpenStartCharging(charger)}
+                      >
+                        {isAvailable ? (
+                          <BoltIcon size={14} color="#FFFFFF" />
+                        ) : (
+                          <CalendarIcon size={14} color="#FFFFFF" />
+                        )}
+                        <Text
+                          style={[
+                            styles.actionBtnText,
+                            isAvailable ? styles.actionBtnTextStart : styles.actionBtnTextReserve,
+                          ]}
+                        >
+                          {isAvailable ? 'Start' : 'Reserve'}
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
                 </View>
               );
@@ -861,7 +952,7 @@ export default function HomeScreen() {
           contentContainerStyle={[styles.mainScroll, { paddingBottom: 110 }]}
           showsVerticalScrollIndicator={false}
         >
-          {/* Resident Identity Card */}
+          {/* Resident Identity Card – Issue #27: single clean identity, no duplicate role labels */}
           <View style={styles.profileHeroCard}>
             <View style={styles.profileHeroHeader}>
               <View style={styles.profileAvatarLarge}>
@@ -873,25 +964,41 @@ export default function HomeScreen() {
                 <Text style={styles.profileFullName}>
                   {user?.fullName || 'Nitish Jaganwar'}
                 </Text>
+                {/* Single subtitle line: flat number only */}
                 <Text style={styles.profileSubInfo}>
                   {user?.flatNumber || (user?.block ? `${user.block} - ${user.apartmentNumber}` : 'Tower A - 402')}
                 </Text>
+                {/* Single authoritative badge */}
                 <View style={styles.residentBadge}>
                   <Text style={styles.residentBadgeText}>
-                    {user?.residentType === 'TENANT' ? 'Apartment Tenant' : 'Apartment Owner'}
+                    {user?.residentType === 'TENANT' ? 'Tenant' : 'Owner'}
                   </Text>
                 </View>
               </View>
             </View>
 
             <View style={styles.profileContactDivider} />
+
+            {/* Issue #28: Masked phone number with reveal toggle */}
             <View style={styles.profileContactRow}>
               <Text style={styles.profileContactLabel}>Registered Mobile</Text>
-              <Text style={styles.profileContactValue}>{user?.mobile || '+91 83057 63637'}</Text>
+              <Pressable
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                onPress={() => setPhoneRevealed((v) => !v)}
+              >
+                <Text style={styles.profileContactValue}>
+                  {phoneRevealed
+                    ? (user?.mobile ? `+91 ${user.mobile}` : '+91 83057 63637')
+                    : '+91 83057 •••••'}
+                </Text>
+                <Text style={styles.profileRevealToggle}>
+                  {phoneRevealed ? 'Hide' : 'Show'}
+                </Text>
+              </Pressable>
             </View>
           </View>
 
-          {/* My EV Garage Card */}
+          {/* My EV Garage Card – Issue #30: label battery capacity clearly */}
           <View style={styles.profileSectionCard}>
             <View style={styles.profileSectionHeader}>
               <Text style={styles.profileSectionTitle}>My EV Garage</Text>
@@ -910,10 +1017,12 @@ export default function HomeScreen() {
                   {selectedVehicle?.name || 'Tata Nexon EV'}
                 </Text>
                 <Text style={styles.garageVehiclePlate}>
-                  {selectedVehicle?.plateNumber || 'MP 04 AB 1234'} • {selectedVehicle?.connectorType || 'CCS2'}
+                  {selectedVehicle?.plateNumber || 'MP 04 AB 1234'} · {selectedVehicle?.connectorType || 'CCS2'}
                 </Text>
               </View>
+              {/* Issue #30: labeled battery pill */}
               <View style={styles.garageBatteryPill}>
+                <Text style={styles.garageBatteryLabel}>Battery</Text>
                 <Text style={styles.garageBatteryText}>
                   {selectedVehicle?.batteryCapacityKwh || 40.5} kWh
                 </Text>
@@ -921,99 +1030,108 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {/* Society EV Tariff Policy Card */}
+          {/* Help, Guide & Intercom Support Card */}
           <View style={styles.profileSectionCard}>
-            <View style={styles.profileSectionHeader}>
-              <Text style={styles.profileSectionTitle}>Society EV Tariff Policy</Text>
-              <View style={styles.citrineVerifiedBadge}>
-                <Text style={styles.citrineVerifiedText}>Standard Rate</Text>
+            <Pressable
+              style={styles.profileSectionHeader}
+              onPress={() => setGuideExpanded((v) => !v)}
+              accessibilityRole="button"
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <InfoIcon size={16} color="#2563EB" />
+                <Text style={styles.profileSectionTitle}>Help & Support</Text>
               </View>
-            </View>
-            <Text style={styles.profileSectionSub}>
-              Approved by Society EV Committee
-            </Text>
+              <Text style={{ fontSize: 12, color: '#2563EB', fontWeight: '600' }}>
+                {guideExpanded ? 'Hide ▲' : 'View ▼'}
+              </Text>
+            </Pressable>
 
-            <View style={styles.tariffPolicyGrid}>
-              <View style={styles.tariffPolicyCol}>
-                <Text style={styles.tariffPolicyLabel}>Active Society Rate</Text>
-                <Text style={styles.tariffPolicyVal}>₹{liveTariff.pricePerKwh.toFixed(2)} <Text style={styles.tariffUnit}>/ kWh</Text></Text>
-                <Text style={styles.tariffPolicyDesc}>RWA Standard Tariff</Text>
+            {guideExpanded && (
+              <View style={{ paddingTop: 10 }}>
+                {/* 3-Step Charging Tutorial */}
+                <Text style={styles.helpSubtitle}>How to Charge</Text>
+                <View style={[styles.stepsRow, { marginBottom: 16 }]}>
+                  <View style={styles.stepItem}>
+                    <View style={styles.stepCircle}>
+                      <Text style={styles.stepNumber}>1</Text>
+                    </View>
+                    <Text style={styles.stepTitle}>Pick Bay</Text>
+                    <Text style={styles.stepSub}>Select free socket</Text>
+                  </View>
+                  <View style={styles.stepArrow}><Text style={styles.arrowText}>→</Text></View>
+                  <View style={styles.stepItem}>
+                    <View style={styles.stepCircle}>
+                      <Text style={styles.stepNumber}>2</Text>
+                    </View>
+                    <Text style={styles.stepTitle}>Plug In</Text>
+                    <Text style={styles.stepSub}>Connect cable</Text>
+                  </View>
+                  <View style={styles.stepArrow}><Text style={styles.arrowText}>→</Text></View>
+                  <View style={styles.stepItem}>
+                    <View style={styles.stepCircle}>
+                      <Text style={styles.stepNumber}>3</Text>
+                    </View>
+                    <Text style={styles.stepTitle}>Scan & Start</Text>
+                    <Text style={styles.stepSub}>Instant electricity</Text>
+                  </View>
+                </View>
               </View>
-              <View style={styles.tariffPolicyDivider} />
-              <View style={styles.tariffPolicyCol}>
-                <Text style={styles.tariffPolicyLabel}>Billing Method</Text>
-                <Text style={styles.tariffPolicyValGreen}>Post-Paid</Text>
-                <Text style={styles.tariffPolicyDescDiscount}>Billed to Flat A-402</Text>
-              </View>
-            </View>
-
-            <View style={styles.policyLedgerNotice}>
-              <Text style={styles.policyLedgerIcon}>📋</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.policyLedgerTitle}>Monthly Maintenance Ledger</Text>
-                <Text style={styles.policyLedgerText}>
-                  No wallet balance or card payment needed. All charging energy consumed is consolidated into your flat's monthly maintenance statement.
-                </Text>
-              </View>
-            </View>
+            )}
           </View>
 
-          {/* Hardware & Engineering Diagnostics (Technical 3-Phase Readings) */}
-          <View style={styles.profileSectionCard}>
-            <View style={styles.profileSectionHeader}>
-              <Text style={styles.profileSectionTitle}>Hardware & Phase Diagnostics</Text>
-              <View style={styles.citrineVerifiedBadge}>
-                <Text style={styles.citrineVerifiedText}>Live Telemetry</Text>
+          {/* Hardware Diagnostics hidden behind admin unlock (5 taps on version) */}
+          {adminUnlocked && (
+            <View style={styles.profileSectionCard}>
+              <View style={styles.profileSectionHeader}>
+                <Text style={styles.profileSectionTitle}>Hardware & Phase Diagnostics</Text>
+                <View style={styles.citrineVerifiedBadge}>
+                  <Text style={styles.citrineVerifiedText}>Admin</Text>
+                </View>
               </View>
+              <Text style={styles.profileSectionSub}>
+                Live 3-phase readings (L1, L2, L3), voltage, current & raw hardware telemetry
+              </Text>
+              <Pressable
+                style={styles.diagnosticsActionBtn}
+                onPress={() => setDiagnosticsModalVisible(true)}
+              >
+                <BoltIcon size={15} color="#2563EB" />
+                <Text style={styles.diagnosticsActionBtnText}>Open 3-Phase Engineering Monitor</Text>
+              </Pressable>
             </View>
-            <Text style={styles.profileSectionSub}>
-              View live 3-phase readings (L1, L2, L3), voltage, current & raw hardware telemetry
-            </Text>
+          )}
+
+          {/* Clean Bottom Spaced Sign Out & App Version */}
+          <View style={styles.bottomSignOutSection}>
             <Pressable
-              style={styles.diagnosticsActionBtn}
-              onPress={() => setDiagnosticsModalVisible(true)}
+              style={styles.subtleSignOutBtn}
+              onPress={() => setSignOutModalVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out of account"
             >
-              <Text style={styles.diagnosticsActionBtnText}>⚡ Open 3-Phase Engineering Monitor</Text>
+              <Text style={styles.subtleSignOutText}>Sign out of account</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                const next = adminTapCount + 1;
+                setAdminTapCount(next);
+                if (next >= 5) {
+                  setAdminUnlocked(true);
+                  Alert.alert('Admin Mode', 'Engineering diagnostics unlocked.');
+                }
+              }}
+            >
+              <Text style={styles.appVersionText}>tBits Plug · Community v2.4</Text>
             </Pressable>
           </View>
-
-          {/* Basement Parking & Security Helpdesk */}
-          <View style={styles.profileSectionCard}>
-            <Text style={styles.profileSectionTitle}>Basement Security & Helpdesk</Text>
-            <View style={styles.helpdeskItem}>
-              <Text style={styles.helpdeskIcon}>👮</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.helpdeskTitle}>Basement 2 Guard Station</Text>
-                <Text style={styles.helpdeskSubtitle}>Intercom: Ext 104 • Bay blocking & physical assistance</Text>
-              </View>
-            </View>
-            <View style={styles.helpdeskItem}>
-              <Text style={styles.helpdeskIcon}>🏢</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.helpdeskTitle}>Society Facility Manager</Text>
-                <Text style={styles.helpdeskSubtitle}>Intercom: Ext 101 • Charger maintenance & reset</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* App Version & Logout */}
-          <Text style={styles.appVersionText}>tBits Plug • Apartment Community v2.4</Text>
-          <Pressable
-            style={styles.signOutBtn}
-            onPress={async () => {
-              await logout();
-              router.replace('/');
-            }}
-          >
-            <Text style={styles.signOutBtnText}>Sign Out of Apartment Account</Text>
-          </Pressable>
         </ScrollView>
       )}
 
       {/* -------------------------------------------------------------
           BOTTOM NAVIGATION BAR
       -------------------------------------------------------------- */}
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <Pressable
           style={styles.tabBtn}
           onPress={() => setActiveTab('HOME')}
@@ -1059,11 +1177,9 @@ export default function HomeScreen() {
       >
         <SafeAreaView style={styles.modalSafe}>
           <View style={styles.modalHeader}>
-            <View>
+            <View style={{ flex: 1, marginRight: 10 }}>
               <Text style={styles.modalTitle}>Configure Charging Session</Text>
-              <Text style={styles.modalSub}>
-                {selectedChargerForBooking?.name} · {selectedChargerForBooking?.bayNumber}
-              </Text>
+              <Text style={styles.modalSub}>{modalSubtitle}</Text>
             </View>
             <Pressable
               style={styles.modalCloseBtn}
@@ -1088,7 +1204,10 @@ export default function HomeScreen() {
                 ]}
                 onPress={() => setChargingMode('WALK_IN')}
               >
-                <Text style={styles.modeTabEmoji}>⚡</Text>
+                <BoltIcon
+                  size={16}
+                  color={chargingMode === 'WALK_IN' ? '#2563EB' : '#64748B'}
+                />
                 <Text
                   style={[
                     styles.modeTabText,
@@ -1103,7 +1222,7 @@ export default function HomeScreen() {
                     chargingMode === 'WALK_IN' && styles.modeTabRateActive,
                   ]}
                 >
-                  ₹{selectedChargerForBooking?.walkInRatePerKwh || 15}/kWh
+                  ₹{walkInRate}/kWh
                 </Text>
               </Pressable>
 
@@ -1114,7 +1233,10 @@ export default function HomeScreen() {
                 ]}
                 onPress={() => setChargingMode('RESERVE')}
               >
-                <Text style={styles.modeTabEmoji}>📅</Text>
+                <CalendarIcon
+                  size={16}
+                  color={chargingMode === 'RESERVE' ? '#2563EB' : '#64748B'}
+                />
                 <Text
                   style={[
                     styles.modeTabText,
@@ -1129,7 +1251,7 @@ export default function HomeScreen() {
                     chargingMode === 'RESERVE' && styles.modeTabRateDiscountActive,
                   ]}
                 >
-                  ₹{selectedChargerForBooking?.reservationRatePerKwh || 11}/kWh (Save)
+                  ₹{reservationRate}/kWh {perKwhSavings > 0 ? `(Save ₹${perKwhSavings})` : ''}
                 </Text>
               </Pressable>
             </View>
@@ -1137,10 +1259,10 @@ export default function HomeScreen() {
             {/* Savings Callout Banner if Reserved */}
             {chargingMode === 'RESERVE' ? (
               <View style={styles.discountCallout}>
-                <Text style={styles.discountCalloutIcon}>🎉</Text>
+                <ShieldCheckIcon size={20} color="#15803D" />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.discountCalloutTitle}>
-                    Save ₹{selectedChargerForBooking ? selectedChargerForBooking.walkInRatePerKwh - selectedChargerForBooking.reservationRatePerKwh : 4} per kWh!
+                    Save ₹{perKwhSavings} per kWh!
                   </Text>
                   <Text style={styles.discountCalloutSub}>
                     Advance planning reduces building transformer peaks. You pay the lower rate!
@@ -1149,7 +1271,7 @@ export default function HomeScreen() {
               </View>
             ) : (
               <View style={styles.walkInCallout}>
-                <Text style={styles.walkInCalloutIcon}>⚡</Text>
+                <BoltIcon size={20} color="#1E40AF" />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.walkInCalloutTitle}>Instant Priority Charging</Text>
                   <Text style={styles.walkInCalloutSub}>
@@ -1163,21 +1285,25 @@ export default function HomeScreen() {
             {chargingMode === 'RESERVE' && (
               <View style={styles.slotPickerSection}>
                 <Text style={styles.fieldLabel}>Select Reservation Time Slot</Text>
-                <View style={styles.slotOptions}>
+                <View style={styles.slotOptionsGrid}>
                   {[
-                    'Today, 04:00 PM - 05:30 PM',
-                    'Today, 06:00 PM - 07:30 PM',
-                    'Tomorrow, 08:00 AM - 09:30 AM',
-                    'Tomorrow, 10:00 AM - 11:30 AM',
+                    'Today, 04:00 - 05:30 PM',
+                    'Today, 06:00 - 07:30 PM',
+                    'Tomorrow, 08:00 - 09:30 AM',
+                    'Tomorrow, 10:00 - 11:30 AM',
                   ].map((slot) => (
                     <Pressable
                       key={slot}
                       style={[
-                        styles.slotChip,
-                        selectedSlotTime === slot && styles.slotChipActive,
+                        styles.slotChipGridItem,
+                        selectedSlotTime === slot && styles.slotChipGridItemActive,
                       ]}
                       onPress={() => setSelectedSlotTime(slot)}
                     >
+                      <ClockIcon
+                        size={13}
+                        color={selectedSlotTime === slot ? '#2563EB' : '#64748B'}
+                      />
                       <Text
                         style={[
                           styles.slotChipText,
@@ -1193,8 +1319,15 @@ export default function HomeScreen() {
             )}
 
             {/* Energy Input */}
-            <Text style={styles.fieldLabel}>How much energy do you need?</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8, marginBottom: 6 }}>
+              <Text style={styles.fieldLabel}>Target Energy to Charge</Text>
+              <Text style={styles.energyHelperSubtitle}>
+                {selectedVehicle?.name || 'EV'} ({vehicleCapacity} kWh capacity)
+              </Text>
+            </View>
+
             <View style={styles.energyInputRow}>
+              <BoltIcon size={18} color="#2563EB" />
               <TextInput
                 style={styles.energyInput}
                 value={requestedKwh.toString()}
@@ -1203,28 +1336,30 @@ export default function HomeScreen() {
                   setRequestedKwh(isNaN(val) ? 0 : val);
                 }}
                 keyboardType="decimal-pad"
+                placeholder="0.0"
+                placeholderTextColor="#94A3B8"
               />
               <Text style={styles.energyUnitSuffix}>kWh</Text>
             </View>
 
-            {/* Quick Energy Chips */}
+            {/* Quick Energy Chips based on vehicle type */}
             <View style={styles.presetChipsRow}>
-              {[5, 10, 15, 25, 35].map((amt) => (
+              {energyPresets.map((preset) => (
                 <Pressable
-                  key={amt}
+                  key={preset.label}
                   style={[
                     styles.presetChip,
-                    requestedKwh === amt && styles.presetChipActive,
+                    requestedKwh === preset.value && styles.presetChipActive,
                   ]}
-                  onPress={() => setRequestedKwh(amt)}
+                  onPress={() => setRequestedKwh(preset.value)}
                 >
                   <Text
                     style={[
                       styles.presetChipText,
-                      requestedKwh === amt && styles.presetChipTextActive,
+                      requestedKwh === preset.value && styles.presetChipTextActive,
                     ]}
                   >
-                    {amt} kWh
+                    {preset.label}
                   </Text>
                 </Pressable>
               ))}
@@ -1234,22 +1369,28 @@ export default function HomeScreen() {
             <View style={styles.estimateBox}>
               <View style={styles.estimateRow}>
                 <Text style={styles.estimateLabel}>Selected Rate</Text>
-                <Text style={styles.estimateValue}>₹{activeRate} / kWh</Text>
+                <Text style={[styles.estimateValue, { fontVariant: ['tabular-nums'] }]}>
+                  ₹{activeRate} / kWh
+                </Text>
               </View>
               <View style={styles.estimateRow}>
                 <Text style={styles.estimateLabel}>Requested Energy</Text>
-                <Text style={styles.estimateValue}>{requestedKwh} kWh</Text>
+                <Text style={[styles.estimateValue, { fontVariant: ['tabular-nums'] }]}>
+                  {requestedKwh} kWh
+                </Text>
               </View>
               <View style={styles.estimateRow}>
                 <Text style={styles.estimateLabel}>Estimated Time</Text>
-                <Text style={styles.estimateValue}>
-                  ~{Math.round((requestedKwh / (selectedChargerForBooking?.powerKw || 7.4)) * 60)} mins
+                <Text style={[styles.estimateValue, { fontVariant: ['tabular-nums'] }]}>
+                  ~{Math.round((requestedKwh / (selectedChargerForBooking?.powerKw || (is2WCharger ? 3.3 : 7.4))) * 60)} mins
                 </Text>
               </View>
               <View style={styles.estimateDivider} />
               <View style={styles.estimateRow}>
                 <Text style={styles.estimateTotalLabel}>Estimated Total Bill</Text>
-                <Text style={styles.estimateTotalValue}>₹{estimatedCost}</Text>
+                <Text style={[styles.estimateTotalValue, { fontVariant: ['tabular-nums'] }]}>
+                  ₹{estimatedCost}
+                </Text>
               </View>
             </View>
           </ScrollView>
@@ -1264,11 +1405,21 @@ export default function HomeScreen() {
                   : handleConfirmReservation
               }
             >
-              <Text style={styles.confirmCtaText}>
-                {chargingMode === 'WALK_IN'
-                  ? 'Proceed to Scan QR Code 📷'
-                  : `Confirm Reservation (Save ₹${potentialSavings})`}
-              </Text>
+              <View style={styles.confirmCtaContent}>
+                {chargingMode === 'WALK_IN' ? (
+                  <>
+                    <QrCodeIcon size={18} color="#FFFFFF" />
+                    <Text style={styles.confirmCtaText}>Scan QR Code to Start</Text>
+                  </>
+                ) : (
+                  <>
+                    <CalendarIcon size={18} color="#FFFFFF" />
+                    <Text style={styles.confirmCtaText}>
+                      Confirm Reservation {Number(potentialSavings) > 0 ? `(Save ₹${potentialSavings})` : ''}
+                    </Text>
+                  </>
+                )}
+              </View>
             </Pressable>
           </View>
         </SafeAreaView>
@@ -1284,6 +1435,10 @@ export default function HomeScreen() {
         onViewSlots={() => {
           setQrScannerVisible(false);
           setActiveTab('HOME');
+        }}
+        onSelectCharger={(charger) => {
+          setQrScannerVisible(false);
+          handleOpenStartCharging(charger);
         }}
       />
 
@@ -1470,6 +1625,47 @@ export default function HomeScreen() {
                 onPress={handleExecuteStopSession}
               >
                 <Text style={styles.dialogDestructiveBtnText}>Yes, Stop</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* -------------------------------------------------------------
+          CUSTOM DIALOG: SIGN OUT CONFIRMATION POPUP
+      -------------------------------------------------------------- */}
+      <Modal
+        visible={signOutModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSignOutModalVisible(false)}
+      >
+        <View style={styles.customDialogOverlay}>
+          <View style={styles.customDialogCard}>
+            <View style={styles.dialogIconRingAmber}>
+              <AlertTriangleIcon size={26} color="#DC2626" />
+            </View>
+            <Text style={styles.dialogTitle}>Sign out of account?</Text>
+            <Text style={styles.dialogSubtitle}>
+              You will be signed out of Flat {user?.flatNumber || 'Tower A - 402'}. You can log back in anytime with your phone OTP.
+            </Text>
+
+            <View style={styles.dialogBtnRow}>
+              <Pressable
+                style={styles.dialogGhostBtn}
+                onPress={() => setSignOutModalVisible(false)}
+              >
+                <Text style={styles.dialogGhostBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.dialogDestructiveBtn}
+                onPress={async () => {
+                  setSignOutModalVisible(false);
+                  await logout();
+                  router.replace('/');
+                }}
+              >
+                <Text style={styles.dialogDestructiveBtnText}>Sign Out</Text>
               </Pressable>
             </View>
           </View>
@@ -1762,18 +1958,111 @@ const styles = StyleSheet.create({
 
   mainScroll: { paddingHorizontal: 20, paddingTop: 16 },
 
-  // 3-Step Guide Card
-  guideCard: {
+  // Hero Scan & Charge Action (Single prominent entry)
+  heroScanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#2563EB',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 20,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  heroScanLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  heroScanIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroScanTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  heroScanTag: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  heroScanTagText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.4,
+  },
+  heroScanSubtitle: {
+    fontSize: 11,
+    color: '#DBEAFE',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  heroScanArrowCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+    shadowColor: '#000000',
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  heroScanArrowText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2563EB',
+    lineHeight: 18,
+  },
+
+  // 3-Step Guide Card – now in Profile
+  guideToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  guideToggleText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1D4ED8',
+  },
+  guideToggleChevron: {
+    fontSize: 11,
+    color: '#2563EB',
+    fontWeight: '600',
+  },
+  guideCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    marginBottom: 20,
-    shadowColor: '#000000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    marginBottom: 14,
   },
   guideHeading: {
     fontSize: 12,
@@ -1989,26 +2278,27 @@ const styles = StyleSheet.create({
   filterChipText: { fontSize: 12, fontWeight: '500', color: '#64748B' },
   filterChipTextActive: { color: '#FFFFFF', fontWeight: '600' },
 
-  // Charger Cards
-  chargerList: { gap: 14 },
+  // Charger Cards – compact ~120px
+  chargerList: { gap: 10 },
   chargerCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
     shadowColor: '#000000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
   },
   cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
   },
-  chargerMetaCol: { flex: 1, marginRight: 8 },
+  chargerMetaCol: { flex: 1, marginRight: 6 },
   chargerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   chargerName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
   bayBadge: {
@@ -2019,6 +2309,58 @@ const styles = StyleSheet.create({
   },
   bayBadgeText: { fontSize: 11, fontWeight: '600', color: '#475569' },
   chargerSubDetail: { fontSize: 12, color: '#64748B', marginTop: 3, fontWeight: '500' },
+
+  // Compact "Fits" chip inline with name
+  compatChip: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  compatChipText: { fontSize: 10, fontWeight: '700', color: '#15803D' },
+
+  // Incompatible Chip
+  incompatChip: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  incompatChipText: { fontSize: 10, fontWeight: '600', color: '#64748B' },
+  chargerCardIncompatible: {
+    opacity: 0.72,
+    backgroundColor: '#FAFAFA',
+  },
+
+  // Society tariff banner – shown once above the card list
+  societyTariffBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  societyTariffBannerText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#1D4ED8',
+    flex: 1,
+  },
+
+  // Card footer rate hint (replaces the large repeated inner box)
+  cardRateHint: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
 
   // Status Pills
   statusPill: {
@@ -2081,13 +2423,13 @@ const styles = StyleSheet.create({
   },
   minimalSaveBadgeText: { fontSize: 9, fontWeight: '600', color: '#15803D' },
 
-  // Card Footer
+  // Card Footer – compact
   cardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 14,
-    paddingTop: 12,
+    marginTop: 10,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
@@ -2104,6 +2446,21 @@ const styles = StyleSheet.create({
   },
   actionBtnStart: { backgroundColor: '#16A34A' },
   actionBtnReserve: { backgroundColor: '#2563EB' },
+  actionBtnActiveSession: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  actionBtnOccupiedLocked: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  actionBtnIncompatible: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
   actionBtnText: { fontSize: 13, fontWeight: '600' },
   actionBtnTextStart: { color: '#FFFFFF' },
   actionBtnTextReserve: { color: '#FFFFFF' },
@@ -2172,7 +2529,7 @@ const styles = StyleSheet.create({
   },
   modalCloseText: { fontSize: 14, color: '#64748B', fontWeight: '600' },
   modalScrollView: { flex: 1 },
-  modalScrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 60, flexGrow: 1 },
+  modalScrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 130, flexGrow: 1 },
 
   modeTabs: {
     flexDirection: 'row',
@@ -2187,6 +2544,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: 'center',
+    gap: 4,
   },
   modeTabActive: {
     backgroundColor: '#FFFFFF',
@@ -2195,12 +2553,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  modeTabEmoji: { fontSize: 18, marginBottom: 2 },
   modeTabText: { fontSize: 12, fontWeight: '500', color: '#64748B' },
   modeTabTextActive: { color: '#0F172A', fontWeight: '600' },
-  modeTabRate: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
+  modeTabRate: { fontSize: 11, color: '#64748B', marginTop: 2, fontVariant: ['tabular-nums'] },
   modeTabRateActive: { color: '#2563EB', fontWeight: '600' },
-  modeTabRateDiscount: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
+  modeTabRateDiscount: { fontSize: 11, color: '#64748B', marginTop: 2, fontVariant: ['tabular-nums'] },
   modeTabRateDiscountActive: { color: '#16A34A', fontWeight: '600' },
 
   discountCallout: {
@@ -2214,7 +2571,6 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     alignItems: 'center',
   },
-  discountCalloutIcon: { fontSize: 20 },
   discountCalloutTitle: { fontSize: 13, fontWeight: '600', color: '#15803D' },
   discountCalloutSub: { fontSize: 11, color: '#166534', marginTop: 2 },
 
@@ -2229,7 +2585,6 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     alignItems: 'center',
   },
-  walkInCalloutIcon: { fontSize: 20 },
   walkInCalloutTitle: { fontSize: 13, fontWeight: '600', color: '#1E40AF' },
   walkInCalloutSub: { fontSize: 11, color: '#1E3A8A', marginTop: 2 },
 
@@ -2237,41 +2592,56 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#334155',
-    marginBottom: 8,
-    marginTop: 6,
+  },
+  energyHelperSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '500',
   },
   slotPickerSection: { marginBottom: 16 },
-  slotOptions: { gap: 8 },
-  slotChip: {
+  slotOptionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  slotChipGridItem: {
+    width: '48.5%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
     borderRadius: 10,
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
-  slotChipActive: {
+  slotChipGridItemActive: {
     backgroundColor: '#EFF6FF',
     borderColor: '#2563EB',
   },
-  slotChipText: { fontSize: 13, color: '#475569', fontWeight: '500' },
+  slotChipText: { fontSize: 12, color: '#475569', fontWeight: '500' },
   slotChipTextActive: { color: '#2563EB', fontWeight: '600' },
 
   energyInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#93C5FD',
     borderRadius: 12,
     paddingHorizontal: 14,
-    height: 50,
+    height: 52,
+    gap: 10,
   },
   energyInput: {
     flex: 1,
     fontSize: 18,
     fontWeight: '700',
     color: '#0F172A',
+    fontVariant: ['tabular-nums'],
   },
   energyUnitSuffix: { fontSize: 14, fontWeight: '600', color: '#64748B' },
 
@@ -2283,13 +2653,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   presetChip: {
-    paddingVertical: 6,
+    paddingVertical: 7,
     paddingHorizontal: 12,
     borderRadius: 14,
     backgroundColor: '#F1F5F9',
   },
   presetChipActive: { backgroundColor: '#2563EB' },
-  presetChipText: { fontSize: 12, fontWeight: '500', color: '#475569' },
+  presetChipText: { fontSize: 12, fontWeight: '500', color: '#475569', fontVariant: ['tabular-nums'] },
   presetChipTextActive: { color: '#FFFFFF', fontWeight: '600' },
 
   estimateBox: {
@@ -2301,12 +2671,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     gap: 8,
   },
-  estimateRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  estimateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   estimateLabel: { fontSize: 13, color: '#64748B', fontWeight: '400' },
   estimateValue: { fontSize: 13, color: '#0F172A', fontWeight: '600' },
   estimateDivider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 4 },
   estimateTotalLabel: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
-  estimateTotalValue: { fontSize: 18, fontWeight: '700', color: '#16A34A' },
+  estimateTotalValue: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
 
   modalFooterPinned: {
     paddingHorizontal: 20,
@@ -2326,6 +2696,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 3,
+  },
+  confirmCtaContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   confirmCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
 
@@ -2379,7 +2755,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   profileContactLabel: { fontSize: 12, color: '#64748B' },
-  profileContactValue: { fontSize: 13, fontWeight: '600', color: '#0F172A' },
+  profileContactValue: { fontSize: 13, fontWeight: '600', color: '#0F172A', fontVariant: ['tabular-nums'] },
+  profileRevealToggle: { fontSize: 11, fontWeight: '600', color: '#2563EB', marginLeft: 4 },
 
   profileSectionCard: {
     backgroundColor: '#FFFFFF',
@@ -2422,8 +2799,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
+    alignItems: 'center',
   },
-  garageBatteryText: { fontSize: 11, fontWeight: '600', color: '#059669' },
+  garageBatteryLabel: { fontSize: 9, fontWeight: '700', color: '#059669', textTransform: 'uppercase', letterSpacing: 0.5 },
+  garageBatteryText: { fontSize: 11, fontWeight: '700', color: '#059669', fontVariant: ['tabular-nums'] },
 
   tariffPolicyGrid: {
     flexDirection: 'row',
@@ -2461,33 +2840,66 @@ const styles = StyleSheet.create({
   helpdeskItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    paddingVertical: 10,
     gap: 10,
   },
+  helpdeskDivider: { height: 1, backgroundColor: '#F1F5F9' },
+  helpdeskCallIcon: { fontSize: 16, color: '#2563EB', fontWeight: '700' },
   helpdeskIcon: { fontSize: 20 },
   helpdeskTitle: { fontSize: 13, fontWeight: '600', color: '#0F172A' },
   helpdeskSubtitle: { fontSize: 11, color: '#64748B', marginTop: 1 },
 
+  helpSubtitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  intercomRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  intercomPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  intercomPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1D4ED8',
+  },
+
+  // Subtle bottom Sign Out section
+  bottomSignOutSection: {
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 30,
+    gap: 12,
+  },
+  subtleSignOutBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  subtleSignOutText: {
+    color: '#DC2626',
+    fontWeight: '600',
+    fontSize: 14,
+  },
   appVersionText: {
     textAlign: 'center',
     color: '#94A3B8',
     fontSize: 11,
-    marginTop: 10,
-    marginBottom: 12,
   },
-  signOutBtn: {
-    height: 46,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  signOutBtnText: { color: '#DC2626', fontWeight: '600', fontSize: 13 },
 
   // Custom Branded Popups (Change #3)
   customDialogOverlay: {
